@@ -48,3 +48,9 @@ def pytest_runtest_protocol(item, nextitem):
 
                 torch.cuda.empty_cache()
             break
+
+
+def pytest_sessionstart(session):
+    # To counter TransformerEngine v2.3’s lazy_compile deferral,
+    # which will cause Pytest thinks there's a tread leakage.
+    import torch._inductor.async_compile  # noqa: F401
