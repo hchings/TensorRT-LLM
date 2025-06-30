@@ -1,4 +1,5 @@
-from tensorrt_llm import LLM, SamplingParams
+from tensorrt_llm import SamplingParams
+from tensorrt_llm._tensorrt_llm import LLM
 
 
 def main():
