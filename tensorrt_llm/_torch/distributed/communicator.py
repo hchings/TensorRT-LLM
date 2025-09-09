@@ -1,4 +1,5 @@
 import os
+import pickle
 from abc import ABC, abstractmethod
 from functools import wraps
 from typing import Optional, ValuesView
@@ -15,7 +16,8 @@ from torch.distributed.distributed_c10d import (_object_to_tensor,
 from tensorrt_llm._utils import (mpi_allgather, mpi_barrier, mpi_broadcast,
                                  mpi_comm, mpi_disabled, mpi_isend,
                                  mpi_isend_object, mpi_recv, mpi_recv_object,
-                                 mpi_send, mpi_send_object)
+                                 mpi_send, mpi_send_object, nvtx_range,
+                                 nvtx_mark)
 from tensorrt_llm.logger import logger
 from tensorrt_llm.mapping import Mapping
 
@@ -263,12 +265,36 @@ class TorchDist(Distributed):
     @log_op
     def broadcast(self, obj, root=0):
         if isinstance(obj, torch.Tensor):
-            dist.broadcast(obj, src=root)
-            return obj
+            nvtx_id = torch.cuda.nvtx.range_start("torchdist_broadcast_tensor")
+            try:
+                dist.broadcast(obj, src=root)
+                return obj
+            finally:
+                torch.cuda.nvtx.range_end(nvtx_id)
         else:
-            obj_list = [obj]
-            dist.broadcast_object_list(obj_list, src=root)
-            return obj_list[0]
+            # Arrival skew check
+            with nvtx_range("pre_broadcast_barrier(world)"):
+                dist.barrier()
+
+            # Payload size marker (root only)
+            if self.rank == root:
+                try:
+                    _bytes = len(pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
+                except Exception:
+                    _bytes = -1
+                with nvtx_range(f"broadcast_payload(world, bytes={_bytes})"):
+                    pass
+
+            nvtx_id = torch.cuda.nvtx.range_start(
+                "torchdist_broadcast_object_list")
+            try:
+                obj_list = [obj]
+                # print(f"broadcast_object_list: {obj_list}")
+                dist.broadcast_object_list(obj_list, src=root)
+                return obj_list[0]
+            finally:
+                torch.cuda.nvtx.range_end(nvtx_id)
+
 
     @log_op
     def allgather(self, obj):
@@ -318,19 +344,20 @@ class TorchDist(Distributed):
 
     @log_op
     def recv_object(self, src, tag=0):
-        size_tensor = torch.tensor([0], dtype=torch.int32)
-        torch.distributed.recv(size_tensor,
-                               src=src,
-                               tag=tag,
-                               group=torch.distributed.group.WORLD)
-        bytes_size = size_tensor.item()
-        recv_tensor = torch.empty(bytes_size, dtype=torch.uint8)
-        torch.distributed.recv(recv_tensor,
-                               src=src,
-                               tag=tag,
-                               group=torch.distributed.group.WORLD)
-        return _tensor_to_object(recv_tensor, bytes_size,
-                                 torch.distributed.group.WORLD)
+        with nvtx_range("torchdist_recv_object"):
+            size_tensor = torch.tensor([0], dtype=torch.int32)
+            torch.distributed.recv(size_tensor,
+                                   src=src,
+                                   tag=tag,
+                                   group=torch.distributed.group.WORLD)
+            bytes_size = size_tensor.item()
+            recv_tensor = torch.empty(bytes_size, dtype=torch.uint8)
+            torch.distributed.recv(recv_tensor,
+                                   src=src,
+                                   tag=tag,
+                                   group=torch.distributed.group.WORLD)
+            return _tensor_to_object(recv_tensor, bytes_size,
+                                     torch.distributed.group.WORLD)
 
     @log_op
     def send_object(self, obj, dest, tag=0):
@@ -339,18 +366,20 @@ class TorchDist(Distributed):
 
     @log_op
     def isend_object(self, obj, dest, tag=0):
-        input_tensor, local_size = _object_to_tensor(
-            obj, torch.device("cpu"), torch.distributed.group.WORLD)
+        with nvtx_range("torchdist_isend_object"):
+            input_tensor, local_size = _object_to_tensor(
+                obj, torch.device("cpu"), torch.distributed.group.WORLD)
 
-        # Send object size
-        works = []
-        works.append(
-            torch.distributed.isend(torch.tensor([local_size],
-                                                 dtype=torch.int32),
-                                    dst=dest,
-                                    tag=tag))
-        works.append(torch.distributed.isend(input_tensor, dst=dest, tag=tag))
-        return works
+            # Send object size
+            works = []
+            works.append(
+                torch.distributed.isend(torch.tensor([local_size],
+                                                     dtype=torch.int32),
+                                        dst=dest,
+                                        tag=tag))
+            works.append(
+                torch.distributed.isend(input_tensor, dst=dest, tag=tag))
+            return works
 
     @log_op
     def recv_object_from_isend(self, src, tag):
@@ -460,16 +489,44 @@ class TorchDist(Distributed):
     @log_op
     def tp_broadcast(self, obj, root=0):
         if isinstance(obj, torch.Tensor):
-            dist.broadcast(obj, src=root, group=self.mapping.tp_group_pg)
-            return obj
+            with nvtx_range("pre_broadcast_barrier(tp)"):
+                dist.barrier(group=self.mapping.tp_group_pg)
+
+            nvtx_id = torch.cuda.nvtx.range_start("torchdist_tp_broadcast_tensor")
+            try:
+                dist.broadcast(obj, src=root, group=self.mapping.tp_group_pg)
+                return obj
+            finally:
+                torch.cuda.nvtx.range_end(nvtx_id)
+            with nvtx_range("post_broadcast_barrier(tp)"):
+                dist.barrier(group=self.mapping.tp_group_pg)
         else:
-            ret = [obj]
-            torch.distributed.broadcast_object_list(
-                ret,
-                src=root,
-                group=self.mapping.tp_group_pg,
-                device=torch.device("cpu"))
-            return ret[0]
+            with nvtx_range("pre_broadcast_barrier(tp)"):
+                dist.barrier(group=self.mapping.tp_group_pg)
+
+            # Payload size marker (root only)
+            if self.rank == root:
+                try:
+                    _bytes = len(pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
+                except Exception:
+                    _bytes = -1
+                with nvtx_range(f"broadcast_payload(tp, bytes={_bytes})"):
+                    pass
+
+            nvtx_id = torch.cuda.nvtx.range_start(
+                "torchdist_tp_broadcast_object_list")
+            try:
+                ret = [obj]
+                torch.distributed.broadcast_object_list(
+                    ret,
+                    src=root,
+                    group=self.mapping.tp_group_pg,
+                    device=torch.device("cpu"))
+                return ret[0]
+            finally:
+                torch.cuda.nvtx.range_end(nvtx_id)
+            with nvtx_range("post_broadcast_barrier(tp)"):
+                dist.barrier(group=self.mapping.tp_group_pg)
 
 
 # TODO: rename to PPCommNCCL
@@ -534,10 +591,12 @@ def init_pp_comm(mapping):
 @TorchDist.log_op
 def pp_recv(tensor):
     """Receive tensors from previous pp rank."""
-    _pp_comm.recv(tensor)
+    with nvtx_range("pp_recv"):
+        _pp_comm.recv(tensor)
 
 
 @TorchDist.log_op
 def pp_send(tensor):
     """Send tensors to next pp rank."""
-    _pp_comm.send(tensor)
+    with nvtx_range("pp_send"):
+        _pp_comm.send(tensor)

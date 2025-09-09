@@ -74,15 +74,18 @@ class ExecutorRequestQueue:
     def _get_from_request_queue(
             self,
             timeout: Optional[datetime.timedelta]) -> List[RequestQueueItem]:
-
+        from tensorrt_llm._utils import nvtx_mark
         items = []
         timeout_secs = timeout.total_seconds() if timeout is not None else None
 
         try:
             if self.request_queue.empty() and (timeout_secs is None
                                                or timeout_secs > 0):
+                print(f"[TIMESTAMP] about to rq_get_wait: {datetime.datetime.now().strftime('%H:%M:%S')}")
                 # if queue is empty and want to wait, wait
-                items.append(self.request_queue.get(timeout=timeout_secs))
+                with nvtx_range(
+                        f"rq_get_wait(rank={self.dist.rank},tp={self.dist.tp_rank})"):
+                    items.append(self.request_queue.get(timeout=timeout_secs))
             else:
                 # if not empty or don't want to wait, just return all items in queue
                 while True:
@@ -105,7 +108,9 @@ class ExecutorRequestQueue:
                 break
 
             try:
-                item = self.request_queue.get(timeout=remaining_timeout)
+                with nvtx_range(
+                        f"rq_get_wait(rank={self.dist.rank},tp={self.dist.tp_rank})"):
+                    item = self.request_queue.get(timeout=remaining_timeout)
                 items.append(item)
             except queue.Empty:
                 break
@@ -269,43 +274,56 @@ class ExecutorRequestQueue:
     ) -> List[RequestQueueItem]:
         """Common logic for fetching and processing requests from the queue."""
         # Calculate timeout
-        idle = (total_num_active_requests == 0) and len(self.waiting_queue) == 0
-        if idle:
-            # In Ray path (TLLM_DISABLE_MPI=1), use a periodic heartbeat timeout so rank 0
-            # reaches the broadcast path regularly to prevent trtllm-serve timeout when idle.
-            timeout = datetime.timedelta(
-                seconds=1200) if self._disable_mpi else None
-        else:
-            timeout = datetime.timedelta(0)
+        timeout = None if (total_num_active_requests == 0) and len(
+            self.waiting_queue) == 0 else datetime.timedelta(0)
+        # idle = (total_num_active_requests == 0) and len(self.waiting_queue) == 0
+        # if idle:
+        #     # In Ray path (TLLM_DISABLE_MPI=1), use a periodic heartbeat timeout so rank 0
+        #     # reaches the broadcast path regularly to prevent trtllm-serve timeout when idle.
+        #     timeout = datetime.timedelta(
+        #         seconds=1200) if self._disable_mpi else None
+        # else:
+        #     timeout = datetime.timedelta(0)
+
+
+        
 
         # Fetch requests from rank 0
         new_requests = []
         if self.dist.rank == 0:
-            new_requests = self._get_from_request_queue(timeout)
+            with nvtx_range("_get_from_request_queue"):
+                new_requests = self._get_from_request_queue(timeout)
+                print(f"[TIMESTAMP] Rank 0 got new_requests: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
         # Broadcast requests and handle Python objects
-        new_requests, py_request_objects = self._handle_request_broadcasting(
-            new_requests)
+        with nvtx_range("_handle_request_broadcasting"):
+            new_requests, py_request_objects = self._handle_request_broadcasting(
+                new_requests)
 
         # Validate and filter requests
-        new_requests = self._validate_and_filter_requests(new_requests)
+        with nvtx_range("_validate_and_filter_requests"):
+            new_requests = self._validate_and_filter_requests(new_requests)
 
         # Attach Python objects to requests
         if py_request_objects and (self.dist.tp_size > 1
                                    or self.dist.has_pp) and self.dist.rank > 0:
-            self._attach_py_objects_to_requests(new_requests,
-                                                py_request_objects)
+            with nvtx_range("_attach_py_objects_to_requests"):
+                self._attach_py_objects_to_requests(new_requests,
+                                                    py_request_objects)
 
-        self.waiting_queue.extend(new_requests)
+        with nvtx_range("waiting_queue.extend"):
+            self.waiting_queue.extend(new_requests)
 
-        new_requests = self._get_from_waiting_queue(
-            self.waiting_queue,
-            total_max_num_active_requests - total_num_active_requests,
-            enable_attention_dp, all_ranks_num_active_requests)
+        with nvtx_range("_get_from_waiting_queue"):
+            new_requests = self._get_from_waiting_queue(
+                self.waiting_queue,
+                total_max_num_active_requests - total_num_active_requests,
+                enable_attention_dp, all_ranks_num_active_requests)
 
         # Update performance metrics
         if self.enable_iter_perf_stats and self.dist.rank == 0:
-            self._update_new_active_requests_queue_latency(new_requests)
+            with nvtx_range("_update_new_active_requests_queue_latency"):
+                self._update_new_active_requests_queue_latency(new_requests)
 
         return new_requests
 
@@ -314,9 +332,11 @@ class ExecutorRequestQueue:
             self, activate_requests: List[LlmRequest]) -> List[LlmRequest]:
 
         if self.enable_attention_dp:
-            return self._fetch_new_requests_attention_dp(activate_requests)
+            with nvtx_range("_fetch_new_requests_attention_dp"):
+                return self._fetch_new_requests_attention_dp(activate_requests)
         else:
-            return self._fetch_new_requests_attention_tp(len(activate_requests))
+            with nvtx_range("_fetch_new_requests_attention_tp"):
+                return self._fetch_new_requests_attention_tp(len(activate_requests))
 
     def _fetch_new_requests_attention_tp(
             self, num_active_requests: int) -> List[LlmRequest]:
@@ -561,6 +581,8 @@ class ExecutorRequestQueue:
     ) -> Tuple[List[RequestQueueItem], Optional[Dict]]:
         """Broadcast new_requests and optional Python-only metadata across pipeline stages."""
         payloads = (new_requests, py_request_objects)
+
+        # print(f"=====broadcast_new_requests payloads: {payloads}")
 
         if not self.dist.has_pp:
             return self.dist.broadcast(payloads, root=0)

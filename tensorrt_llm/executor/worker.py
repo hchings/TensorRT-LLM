@@ -67,6 +67,7 @@ class GenerationExecutorWorker(GenerationExecutor):
         tokenizer: Optional[TokenizerBase] = None,
         llm_args: Optional[BaseLlmArgs] = None,
     ) -> None:
+        print(f"[TIMESTAMP] GenerationExecutorWorker.__init__ start: {datetime.datetime.now().strftime('%H:%M:%S')}")
         postproc_config = postproc_worker_config or PostprocWorkerConfig()
         super().__init__(
             num_postprocess_workers=postproc_config.num_postprocess_workers,
@@ -173,8 +174,12 @@ class GenerationExecutorWorker(GenerationExecutor):
             return tllm.Executor(engine, tllm.ModelType.DECODER_ONLY,
                                  executor_config)
 
-        self.engine = _create_py_executor(
-        ) if self.llm_args is not None else _create_engine(executor_config)
+        with nvtx_range_debug("GenerationExecutorWorker.__init__: _create_py_executor"):
+            tmp_start = datetime.datetime.now()
+            self.engine = _create_py_executor(
+            ) if self.llm_args is not None else _create_engine(executor_config)
+            tmp_duration = datetime.datetime.now() - tmp_start
+            print(f"[TIMESTAMP] GenerationExecutorWorker.__init__: _create_py_executor duration: {tmp_duration.total_seconds():.3f} seconds")
 
         self._lora_manager: Optional[LoraManager] = None
         self._prompt_adapter_manager: Optional[PromptAdapterManager] = None
@@ -224,6 +229,8 @@ class GenerationExecutorWorker(GenerationExecutor):
             self.dispatch_kv_cache_events_task,
             error_queue=self._error_queue,
             name="dispatch_kv_cache_events_thread")
+        
+        print(f"[TIMESTAMP] GenerationExecutorWorker.__init__ end: {datetime.datetime.now().strftime('%H:%M:%S')}")
 
     def set_result_queue(self, queue):
         """In multi-gpu mode, result_queue will be set here to communicate between the proxy and the worker 0 process."""
@@ -629,6 +636,7 @@ class GenerationExecutorWorker(GenerationExecutor):
 
         self._results[client_id] = result
 
+        print(f"[TIMESTAMP] GenerationExecutorWorker._enqueue_request start: {datetime.datetime.now().strftime('%H:%M:%S')}")
         request_id = self._enqueue_request(request)
         # request_id returned from backend is necessary for the abort_request method.
         self._client_id_to_request_id[client_id] = request_id

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import ray
@@ -9,6 +10,13 @@ from ray.util.placement_group import (PlacementGroup,
 
 from tensorrt_llm._utils import get_free_port
 from tensorrt_llm.logger import logger
+
+# try:
+from tensorrt_llm._utils import nvtx_range
+# except ImportError:
+#     # Fallback if nvtx_range is not available
+#     from contextlib import nullcontext
+#     nvtx_range = nullcontext
 
 from .._utils import nvtx_range_debug
 from ..executor.utils import has_event_loop
@@ -33,6 +41,7 @@ class RayExecutor(GenerationExecutor):
                  is_llm_executor: bool,
                  tp_size=1,
                  kv_connector_config: Optional[KvCacheConnectorConfig] = None):
+        print(f"[TIMESTAMP] RayExecutor.__init__ start: {datetime.now().strftime('%H:%M:%S')}")
         os.environ['RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES'] = '1'
         os.environ["RAY_DEDUP_LOGS"] = "0"  # for debug
 
@@ -79,7 +88,12 @@ class RayExecutor(GenerationExecutor):
                              is_llm_executor=is_llm_executor,
                              kv_connector_config=kv_connector_config)
 
+        create_workers_start = datetime.now()
         self.create_workers(RayGPUWorker, worker_kwargs)
+        create_workers_duration = datetime.now() - create_workers_start
+        print(f"[TIMESTAMP] RayExecutor.create_workers duration: {create_workers_duration.total_seconds():.3f} seconds")
+        
+        print(f"[TIMESTAMP] RayExecutor.__init__ end: {datetime.now().strftime('%H:%M:%S')}")
 
     @staticmethod
     def create_actor_weak_ref(actor_handle: ray.actor.ActorHandle):
@@ -125,8 +139,11 @@ class RayExecutor(GenerationExecutor):
             "MASTER_PORT": str(self.master_port)
         })
 
+        tmp_start =datetime.now()
         self.placement_group, self.bundle_indices = self._get_placement_group(
             tp_size=self.tp_size)
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] RayExecutor.create_workers: _get_placement_group duration: {tmp_duration.total_seconds():.3f} seconds")
 
         self.workers = [
             RayWorkerWrapper.options(
@@ -139,7 +156,11 @@ class RayExecutor(GenerationExecutor):
             for rank in range(self.world_size)
         ]
 
+        # with nvtx_range("RayExecutor.wait_workers_ready"):
+        tmp_start =datetime.now()
         ray.get([worker.__ray_ready__.remote() for worker in self.workers])
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] RayExecutor.create_workers: __ray_ready__ duration: {tmp_duration.total_seconds():.3f} seconds")
 
     def call_all_ray_workers(self, func: str, leader_only: bool,
                              async_call: bool, *args, **kwargs):
@@ -185,6 +206,7 @@ class RayExecutor(GenerationExecutor):
             which can be waited.
             Forwards the request to the workers through the request queue.
         """
+        # with nvtx_range(f"ensure_queues_initialized"):
         self._ensure_queues_initialized()
 
         request.set_id(self._get_next_client_id())
@@ -197,12 +219,13 @@ class RayExecutor(GenerationExecutor):
             disaggregated_params=request.disaggregated_params,
             logprob_params=logprob_params)
 
-        with nvtx_range_debug("request_queue.put"):
-            self.call_all_ray_workers("enqueue_request",
-                                      leader_only=True,
-                                      request=request,
-                                      async_call=False,
-                                      result_wait_queue=result.queue)
+        # with nvtx_range(f"RayExecutor.call_all_ray_workers_enqueue_request"):
+        print(f"[TIMESTAMP] RayExecutor.submit: {datetime.now().strftime('%H:%M:%S')}")
+        self.call_all_ray_workers("enqueue_request",
+                                    leader_only=True,
+                                    request=request,
+                                    async_call=False,
+                                    result_wait_queue=result.queue)
 
         return result
 

@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -51,24 +52,33 @@ class RayWorkerWrapper:
         self.master_port = os.environ["MASTER_PORT"]
 
         # Ray can't pickle TensorRT logger; import/use it inside methods only.
+        tmp_start =datetime.now()
         from tensorrt_llm.logger import logger
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] logger import duration: {tmp_duration.total_seconds():.3f} seconds")
 
         # Expect to see global counts w/ RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1,
         # unless CUDA_VISIBLE_DEVICES is set to a subset of the global devices
         logger.debug(
             f"CUDA device count visible to Ray: {torch.cuda.device_count()}")
 
+        tmp_start =datetime.now()
         torch.cuda.is_available()
         assert len(ray.get_gpu_ids()) == 1
         # Physical gpu id. Ray might return str and this would cause issues in cuda.set_device() w/o int
         self.gpu = int(ray.get_gpu_ids()[0])
         local_gpu = self.physical_to_local_id(self.gpu)
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] torch.cuda.is_available block duration: {tmp_duration.total_seconds():.3f} seconds")
 
+        init_process_group_start = datetime.now()
         torch.distributed.init_process_group(
             backend="cuda:nccl,cpu:gloo",
             init_method=f"tcp://{self.master_address}:{self.master_port}",
             world_size=world_size,
             rank=rank)
+        init_process_group_duration = datetime.now() - init_process_group_start
+        print(f"[TIMESTAMP] torch.distributed.init_process_group duration: {init_process_group_duration.total_seconds():.3f} seconds")
 
         logger.info(
             f"[Rank {rank}] Finished PG init. Global GPU ID: {self.gpu}, local GPU ID: {local_gpu}"
@@ -76,7 +86,10 @@ class RayWorkerWrapper:
 
         torch.cuda.set_device(local_gpu)
 
+        worker_creation_start = datetime.now()
         self.worker = worker_cls(device_id=local_gpu, **worker_kwargs)
+        worker_creation_duration = datetime.now() - worker_creation_start
+        print(f"[TIMESTAMP] worker_cls creation duration: {worker_creation_duration.total_seconds():.3f} seconds")
 
     def submit(self, request: GenerationRequest) -> GenerationResult:
         return self.worker.submit(request)
@@ -84,6 +97,7 @@ class RayWorkerWrapper:
     def enqueue_request(self,
                         request: GenerationRequest,
                         result_wait_queue: Queue | None = None) -> int:
+        print(f"[TIMESTAMP] RayWorkerWrapper.enqueue_request start: {datetime.now().strftime('%H:%M:%S')}")
         return self.worker.enqueue_request(request, result_wait_queue)
 
     def abort_request(self, request_id: int) -> None:
@@ -135,13 +149,18 @@ class RayGPUWorker(GenerationExecutor):
         tokenizer: Optional[TokenizerBase] = None,
         llm_args: Optional[BaseLlmArgs] = None,
     ) -> None:
+        tmp_start =datetime.now()
         postproc_config = postproc_worker_config or PostprocWorkerConfig()
         super().__init__(
             num_postprocess_workers=postproc_config.num_postprocess_workers,
             postprocess_tokenizer_dir=postproc_config.postprocess_tokenizer_dir,
             is_llm_executor=is_llm_executor,
         )
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] WORKER INIT: super().__init__ duration: {tmp_duration.total_seconds():.3f} seconds")
 
+
+        tmp_start =datetime.now()
         self.engine = None
         self.device_id = device_id
         self.rank = torch.distributed.get_rank()
@@ -156,10 +175,6 @@ class RayGPUWorker(GenerationExecutor):
 
         if not self._is_pytorch_backend:
             raise ValueError(f"Ray GPU worker only supports pytorch backend")
-
-        if not self._is_pytorch_backend and kv_connector_config is not None:
-            raise ValueError(
-                "KV connector config is only supported for PyTorch backend")
 
         if self.global_rank > 1:
             from tensorrt_llm.logger import logger
@@ -181,7 +196,6 @@ class RayGPUWorker(GenerationExecutor):
 
         def _create_py_executor():
             # Largely adapted from GenerationExecutorWorker. WAR: Keep in sync manually.
-
             args = {}
             assert hasattr(
                 self.llm_args, "backend"
@@ -196,14 +210,6 @@ class RayGPUWorker(GenerationExecutor):
                 args["tokenizer"] = tokenizer
                 args["lora_config"] = lora_config
                 args["kv_connector_config"] = kv_connector_config
-            elif self.llm_args.backend == "_autodeploy":
-                from tensorrt_llm._torch.auto_deploy.llm_args import \
-                    LlmArgs as ADLlmArgs
-                from tensorrt_llm._torch.auto_deploy.shim.ad_executor import \
-                    create_autodeploy_executor
-                create_executor = create_autodeploy_executor
-                assert isinstance(self.llm_args, ADLlmArgs)
-                args["ad_config"] = self.llm_args.get_pytorch_backend_config()
             else:
                 raise ValueError(
                     f"Unsupported backend config: {self.llm_args.backend}")
@@ -224,51 +230,19 @@ class RayGPUWorker(GenerationExecutor):
                 # max_seq_len might be updated by model engine as in create_py_executor
                 self.max_seq_len = _executor.max_seq_len
             return _executor
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] WORKER INIT: first chunk duration: {tmp_duration.total_seconds():.3f} seconds")
 
-        def _create_engine(executor_config):
-            if executor_config is None:
-                executor_config = tllm.ExecutorConfig(1)
-            executor_config.logits_post_processor_config = tllm.LogitsPostProcessorConfig(
-                processor_batched=batched_logits_processor, replicate=False)
-            comm_ranks, device_ids = _get_comm_ranks_device_id()
-            executor_config.parallel_config = tllm.ParallelConfig(
-                participant_ids=comm_ranks, device_ids=device_ids)
 
-            if isinstance(engine, Engine):
-                return tllm.Executor(engine.engine,
-                                     json.dumps(engine.config.to_dict(),
-                                                cls=ConfigEncoder),
-                                     tllm.ModelType.DECODER_ONLY,
-                                     executor_config=executor_config,
-                                     managed_weights=engine.managed_weights)
+        tmp_start =datetime.now()
+        self.engine = _create_py_executor()
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] WORKER INIT:_create_py_executor duration: {tmp_duration.total_seconds():.3f} seconds")
 
-            assert not hasattr(executor_config, "backend")
-            return tllm.Executor(engine, tllm.ModelType.DECODER_ONLY,
-                                 executor_config)
-
-        self.engine = _create_py_executor(
-        ) if self.llm_args is not None else _create_engine(executor_config)
-
+        tmp_start =datetime.now()
         self._lora_manager: Optional[LoraManager] = None
         self._prompt_adapter_manager: Optional[PromptAdapterManager] = None
         self._runtime_model_config: Optional[ModelConfig] = None
-        if self.rank == 0 and isinstance(self.engine, tllm.Executor):
-            if isinstance(engine, Engine):
-                engine_config = engine.config
-            else:
-                engine_config = EngineConfig.from_json_file(
-                    f"{engine}/config.json")
-            self._runtime_model_config = _engine_config_to_model_config(
-                engine_config)
-            if engine_config.build_config.plugin_config.lora_plugin:
-                # TODO(azuker): Passing peft cache manager to LoraManager is used for LoRA optimization
-                # (see LoraManager constructor docstring). Getting the peft cache manager from this
-                # point in the TRT flow is currently not supported (it's at the CPP
-                # Executor->ExecutorImpl->TrtGptModel->mPeftCacheManager) therefore for now this LoRA
-                # optimization is not available in TRT-python flow.
-                self._lora_manager = LoraManager(cpp_peft_cache_manager=None)
-            if engine_config.build_config.max_prompt_embedding_table_size > 0:
-                self._prompt_adapter_manager = PromptAdapterManager()
 
         if self.llm_args and getattr(
                 self.llm_args, "backend",
@@ -282,6 +256,8 @@ class RayGPUWorker(GenerationExecutor):
             lora_model_config = self.engine.model_engine.lora_model_config
             assert lora_model_config is not None
             self._lora_model_config = lora_model_config
+        tmp_duration = datetime.now() - tmp_start
+        print(f"[TIMESTAMP] WORKER INIT: _load_lora_adapter duration: {tmp_duration.total_seconds():.3f} seconds")
 
     def abort_request(self, client_id: int) -> None:
         # NOTE: the request_id is the request_id generated by cpp runtime, not the client_id
@@ -319,6 +295,7 @@ class RayGPUWorker(GenerationExecutor):
     def enqueue_request(self,
                         request: GenerationRequest,
                         result_wait_queue: Queue | None = None) -> int:
+        print(f"[TIMESTAMP] RayGPUWorker.enqueue_request: {datetime.now().strftime('%H:%M:%S')}")
         # Largely adapted from GenerationExecutorWorker. WAR: Keep in sync manually.
         assert request.id is not None
         py_lora_path = None
