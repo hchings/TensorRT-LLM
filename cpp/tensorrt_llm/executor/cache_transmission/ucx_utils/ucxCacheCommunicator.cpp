@@ -135,7 +135,7 @@ static std::string getLocalIp(int rank)
                     char address_buffer[INET_ADDRSTRLEN];
                     inet_ntop(AF_INET, addr_ptr, address_buffer, sizeof(address_buffer));
 
-                    TLLM_LOG_DEBUG(mRank, " ***** UCX    Interface: %s IP Address: %s", ifa->ifa_name, address_buffer);
+                    TLLM_LOG_DEBUG(rank, " ***** UCX    Interface: %s IP Address: %s", ifa->ifa_name, address_buffer);
                     ip = address_buffer;
                 }
                 else // IPv6
@@ -155,7 +155,7 @@ static std::string getLocalIp(int rank)
                     {
                         ip = address_buffer;
                     }
-                    TLLM_LOG_DEBUG(mRank, " ***** UCX    Interface: %s IP Address: %s", ifa->ifa_name, ip.c_str());
+                    TLLM_LOG_DEBUG(rank, " ***** UCX    Interface: %s IP Address: %s", ifa->ifa_name, ip.c_str());
                 }
 
                 getIp = true;
@@ -239,7 +239,7 @@ UcxConnectionManager::UcxConnectionManager()
 
         mZmqRepSocket = zmq::socket_t(mZmqContext, zmq::socket_type::rep);
         mZmqRepSocket.set(zmq::sockopt::sndhwm, 1000);
-        std::string localIp = getLocalIp();
+        std::string localIp = getLocalIp(mRank);
         if (localIp.find(':') != std::string::npos)
         {
             // ipv6
