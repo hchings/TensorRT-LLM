@@ -958,7 +958,6 @@ class PyExecutor:
 
     def wait_on_pp_send_handles(self, microbatch_id):
         if self.send_handles[microbatch_id] is not None:
-            # TODO: need clean up
             if self._disable_mpi:
                 for work in self.send_handles[microbatch_id]:
                     try:

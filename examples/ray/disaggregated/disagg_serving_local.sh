@@ -82,7 +82,7 @@ context_servers:
   kv_cache_config:
     free_gpu_memory_fraction: 0.2
   cache_transceiver_config:
-    backend: "ucx"
+    backend: "UCX"
   urls:
       - "localhost:8001"
 generation_servers:
@@ -90,7 +90,7 @@ generation_servers:
   tensor_parallel_size: 1
   pipeline_parallel_size: 1
   cache_transceiver_config:
-    backend: "ucx"
+    backend: "UCX"
   urls:
       - "localhost:8002"
 EOF
