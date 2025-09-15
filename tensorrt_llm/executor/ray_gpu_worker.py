@@ -7,8 +7,6 @@ from typing import Dict, Optional, Union
 import ray
 import torch
 
-from tensorrt_llm.logger import logger
-
 from .._utils import mpi_rank
 from ..bindings import executor as tllm
 from ..builder import Engine, EngineConfig
@@ -39,6 +37,7 @@ class RayWorkerWrapper:
         self.master_port = os.environ["MASTER_PORT"]
 
         # Ray can't pickle TensorRT logger; import/use it inside methods only.
+        global logger
         from tensorrt_llm.logger import logger
 
         # Expect to see global counts w/ RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1,
@@ -132,6 +131,8 @@ class RayGPUWorker(GenerationExecutor):
         tokenizer: Optional[TokenizerBase] = None,
         llm_args: Optional[BaseLlmArgs] = None,
     ) -> None:
+        global logger
+        from tensorrt_llm.logger import logger
         postproc_config = postproc_worker_config or PostprocWorkerConfig()
         super().__init__(
             num_postprocess_workers=postproc_config.num_postprocess_workers,
@@ -155,7 +156,6 @@ class RayGPUWorker(GenerationExecutor):
             raise ValueError(f"Ray GPU worker only supports pytorch backend")
 
         if self.global_rank > 1:
-            from tensorrt_llm.logger import logger
             logger.set_rank(self.global_rank)
 
         if isinstance(engine, list):
@@ -251,7 +251,6 @@ class RayGPUWorker(GenerationExecutor):
         if self.engine.can_enqueue_requests():
             request_id = self._client_id_to_request_id.get(client_id, None)
             if request_id is None:
-                from tensorrt_llm.logger import logger
                 logger.warning(
                     f"Request of client_id {client_id} is finished, cannot abort it."
                 )
@@ -491,7 +490,6 @@ class RayGPUWorker(GenerationExecutor):
         else:
             self.doing_shutdown = True
 
-        from tensorrt_llm.logger import logger
         logger.debug(f'Worker {mpi_rank()} shutting down...')
 
         if self.engine is not None:
