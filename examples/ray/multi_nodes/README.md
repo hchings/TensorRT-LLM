@@ -17,10 +17,14 @@ TensorRT-LLM supports a prototype [Ray orchestrator](../README.md) as an alterna
 2. Once on the head node, launch a multi-node Ray cluster:
     ```shell
     # Remember to set CONTAINER and MOUNTS env vars or variables inside the script to your path.
+    # You can add the TensorRT-LLM installation command in this script if it is not preinstalled in your container.
     >> bash -e run_cluster.sh
     ```
 
 3. Enter the head container and run your TensorRT-LLM driver script
+
+    Note that this step requires TensorRT-LLM to be installed in the containers on all nodes. If it isn’t, install it manually inside each node’s container.
+
     ```shell
     # On the head node
     >> sacct
@@ -31,9 +35,7 @@ TensorRT-LLM supports a prototype [Ray orchestrator](../README.md) as an alterna
     >> enroot list -f # get process id
     >> enroot exec <process id> bash
 
-    # Under your work directory:
-    >> pip install -e . # if needed
-    # You can change this script to a model and parallel settings effective for multi-node inference (e.g., TP8 or TP4PP4)
+    # You can change this script to a model and parallel settings effective for multi-node inference (e.g., TP8 or TP4PP4).
     >> python examples/ray/llm_inference_async_ray.py
     ```
 

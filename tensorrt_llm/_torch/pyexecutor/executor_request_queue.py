@@ -571,7 +571,6 @@ class ExecutorRequestQueue:
 
         # Tag for communication
         tag = self.dist.pp_size  # Use pp_size as tag to avoid conflicts
-        works = []
 
         # Send payloads
         if not self.dist.is_first_pp_rank:
@@ -579,18 +578,12 @@ class ExecutorRequestQueue:
 
         if not self.dist.is_last_pp_rank:
             if self._disable_mpi:
-                works.extend(
-                    self.dist.isend_object(payloads, self.dist.next_pp_rank,
-                                           tag))
+                isend_payload = self.dist.isend_object(payloads,
+                                                       self.dist.next_pp_rank,
+                                                       tag)
+                isend_payload.wait()
             else:
                 self.dist.send_object(payloads, self.dist.next_pp_rank, tag)
-
-        for work in works:
-            try:
-                work.wait()
-            except Exception as e:
-                raise RuntimeError(
-                    f"Asynchronous broadcast operation failed: {e}") from e
 
         return payloads
 

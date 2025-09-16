@@ -78,7 +78,6 @@ echo -e "${BLUE}[INFO] Logs      : $LOG_DIR${RESET}"
 ########################################################
 
 # enabled dashboard only for debug
-# Add cd tekit/ and pip install -e . to head_cmd and worker_cmd if needed
 # Add apt-get install -y --no-install-recommends libzmq3-dev for multi-node disagg
 
 head_cmd=$(cat <<EOF

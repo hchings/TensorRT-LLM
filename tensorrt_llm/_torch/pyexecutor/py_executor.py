@@ -961,15 +961,7 @@ class PyExecutor:
 
     def wait_on_pp_send_handles(self, microbatch_id):
         if self.send_handles[microbatch_id] is not None:
-            if self._disable_mpi:
-                for work in self.send_handles[microbatch_id]:
-                    try:
-                        work.wait()
-                    except Exception as e:
-                        raise RuntimeError(
-                            f"Asynchronous send operation failed: {e}") from e
-            else:
-                self.send_handles[microbatch_id].wait()
+            self.send_handles[microbatch_id].wait()
             self.send_handles[microbatch_id] = None
 
     def _prepare_and_schedule_batch(self):

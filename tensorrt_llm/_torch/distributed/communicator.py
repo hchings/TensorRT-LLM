@@ -1,7 +1,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import wraps
-from typing import Optional, ValuesView
+from typing import Optional
 
 import numpy as np
 import ray
@@ -165,6 +165,23 @@ class MPIDist(Distributed):
 
     def pp_broadcast(self, obj, root=0):
         return self.pp_comm.bcast(obj, root)
+
+
+class MultiHandleWrapper:
+    """
+    Wrapper that encapsulates multiple handles and provides a single wait() interface
+    to unify the API between MPIDist and TorchDist.
+    """
+
+    def __init__(self, handles):
+        self.handles = handles if isinstance(handles, list) else [handles]
+
+    def wait(self):
+        for handle in self.handles:
+            try:
+                handle.wait()
+            except Exception as e:
+                raise RuntimeError(f"Asynchronous operation failed: {e}") from e
 
 
 class TorchDist(Distributed):
@@ -364,7 +381,7 @@ class TorchDist(Distributed):
                                     dst=dest,
                                     tag=tag))
         works.append(torch.distributed.isend(input_tensor, dst=dest, tag=tag))
-        return works
+        return MultiHandleWrapper(works)
 
     @log_op
     def recv_object_from_isend(self, src, tag):
@@ -375,42 +392,6 @@ class TorchDist(Distributed):
         torch.distributed.recv(recv_tensor, src=src, tag=tag)
         return _tensor_to_object(recv_tensor, bytes_size,
                                  torch.distributed.group.WORLD)
-
-    @log_op
-    def isend_tensor_list(self,
-                          tensor_list: ValuesView[torch.Tensor],
-                          dest,
-                          tag=0):
-        if len(tensor_list) == 0:
-            return None
-        elif len(tensor_list) == 1:
-            return [self.isend_tensor(next(iter(tensor_list)), dest, tag)]
-        return [dist.isend(torch.cat(tensor_list), dst=dest, tag=tag)]
-
-    @log_op
-    def recv_tensor_list(self,
-                         tensor_list: ValuesView[torch.Tensor],
-                         src,
-                         tag=0):
-        if len(tensor_list) == 0:
-            return []
-
-        first_tensor = next(iter(tensor_list))
-        if len(tensor_list) == 1:
-            return [self.recv_tensor(first_tensor, src, tag)]
-
-        # Receive tensors
-        recv_tensor = torch.empty_like(torch.cat(
-            [t.to('meta') for t in tensor_list]),
-                                       device=first_tensor.device)
-        dist.recv(recv_tensor, src, tag)
-        # Assign to tensor_list
-        recv_tensor = recv_tensor.flatten()
-        offset = 0
-        for t in tensor_list:
-            t.copy_(recv_tensor[offset:offset + t.numel()].reshape(t.shape))
-            offset += t.numel()
-        return tensor_list
 
     @log_op
     def allreduce(self,
