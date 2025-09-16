@@ -25,4 +25,4 @@ curl http://localhost:8000/v1/completions \
 ```
 
 ## Disclaimer
-The code is experimental and subject to change. Currently, there are no guarantees regarding functionality, performance, or stability.
+The code is a prototype and subject to change. Currently, there are no guarantees regarding functionality, performance, or stability.
