@@ -378,8 +378,9 @@ class PyExecutor:
         """
         req_ids = self.executor_request_queue.enqueue_requests(requests)
         if result_wait_queue is not None:
-            for req_id in req_ids:
-                self.result_wait_queues[req_id] = result_wait_queue
+            with self.response_cv:
+                for req_id in req_ids:
+                    self.result_wait_queues[req_id] = result_wait_queue
         return req_ids
 
     def await_responses(
@@ -471,7 +472,9 @@ class PyExecutor:
         Enqueue a new request, query is only used in `StarAttention`.
         """
         req_id = self.executor_request_queue.enqueue_request(request, query)
-        self.result_wait_queues[req_id] = result_wait_queue
+        if result_wait_queue is not None:
+            with self.response_cv:
+                self.result_wait_queues[req_id] = result_wait_queue
         return req_id
 
     def set_gather_responses(self, gather_all_responses):
@@ -1734,7 +1737,6 @@ class PyExecutor:
         for request in failed_requests:
             req_id = request.py_request_id
             request.state = LlmRequestState.GENERATION_COMPLETE
-            self._terminate_request(request)
             error_responses[req_id] = LlmResponse(
                 request_id=req_id,
                 error_msg=error_msg,
@@ -1747,6 +1749,8 @@ class PyExecutor:
                 if request not in requests
             ]
         self._enqueue_responses(error_responses.items())
+        for request in failed_requests:
+            self._terminate_request(request)
 
     def _terminate_request(self, request: LlmRequest):
         if self._disagg_pp_termination_handler is not None:
@@ -1770,6 +1774,9 @@ class PyExecutor:
                     self.resource_manager.free_resources(request)
         else:
             self.resource_manager.free_resources(request)
+        if self.dist.rank == 0 or self.gather_all_responses:
+            with self.response_cv:
+                self.result_wait_queues.pop(request.py_request_id, None)
 
     @nvtx_range("_handle_canceled_requests")
     def _handle_canceled_requests(self):
@@ -1829,7 +1836,6 @@ class PyExecutor:
                             req_id] is not None:
                         self.result_wait_queues[req_id].put_response.remote(
                             resp.client_id, resp)
-                        self.result_wait_queues.pop(req_id, None)
                 self.response_cv.notify_all()
 
     @nvtx_range("_handle_first_token_response")
