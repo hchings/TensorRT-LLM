@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import time
 import weakref
 from dataclasses import dataclass, field
 from queue import Empty, Queue
@@ -124,6 +125,7 @@ class CompletionOutput:
     generation_logits: Optional[torch.Tensor] = None
     disaggregated_params: Optional[DisaggregatedParams] = None
     request_perf_metrics: Optional[tllm.RequestPerfMetrics] = None
+    timestamps: Optional[Dict[str, float]] = field(default_factory=dict)
 
     # hidden fields for tracking the diffs
     _last_text_len: int = field(default=0, init=False, repr=False)
@@ -498,6 +500,10 @@ class GenerationResultBase:
                 self._handle_sequence(finish_reasons, response_result,
                                       response_result.sequence_index,
                                       logprobs_result, req_perf_metrics_dict)
+
+            if hasattr(response, 'timestamps') and response.timestamps:
+                response.timestamps['handle_response'] = time.time()
+                self._outputs[0].timestamps = response.timestamps
 
             if response_result.context_logits is not None:
                 self._context_logits = response_result.context_logits

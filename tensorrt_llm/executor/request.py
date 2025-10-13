@@ -127,6 +127,9 @@ class GenerationRequest:
         self.cache_salt_id = cache_salt_id
         self.arrival_time = arrival_time
 
+        # tmp
+        self.timestamps: Dict[str, float] = {}
+
     def set_id(self, id):
         assert self.id is None, f"Request ID is already set: {self.id}"
         self.id = id

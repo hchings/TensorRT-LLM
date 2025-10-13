@@ -472,6 +472,17 @@ def throughput_command(
             options.request_json,
             partial(report_utility.get_request_info, tokenizer))
         report_utility.report_statistics()
+
+        if hasattr(statistics, 'all_timestamps') and statistics.all_timestamps:
+            try:
+                from tensorrt_llm._tmp_utils import (analyze_average_timestamps,
+                                                     dump_timestamps_to_json)
+                logger.info("\n")
+                analyze_average_timestamps(statistics.all_timestamps)
+                dump_timestamps_to_json(statistics.all_timestamps,
+                                        "timestamps_output.json")
+            except ImportError:
+                logger.debug("Timestamp analysis utilities not available")
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt, exiting benchmark...")
     except Exception:
