@@ -13,9 +13,12 @@ from ..llmapi.llm_args import BaseLlmArgs
 from ..llmapi.tokenizer import TokenizerBase
 from ..sampling_params import BatchedLogitsProcessor
 from .base_worker import BaseWorker
+from .ipc import IpcQueue
 from .postproc_worker import PostprocWorkerConfig
-from .request import GenerationRequest
+from .request import GenerationRequest, CancellingRequest
 from .result import GenerationResult
+from .utils import RequestError
+from tensorrt_llm._utils import nvtx_range
 
 __all__ = [
     "RayGPUWorker",
@@ -183,6 +186,12 @@ class RayGPUWorker(BaseWorker):
         if self.global_rank > 1:
             logger.set_rank(self.global_rank)
 
+        # Setup IPC queue for request reading if enabled (leader only)
+        self.request_queue = None
+        self.request_reader_thread = None
+        if self._use_ipc_queue() and self.global_rank == 0:
+            self._setup_ipc_queue()
+
         self.setup_engine()
 
     def _get_comm_ranks_device_id(self):
@@ -196,6 +205,86 @@ class RayGPUWorker(BaseWorker):
         torch.distributed.all_gather_object(device_ids, self.device_id)
         return comm_ranks, device_ids
 
+    @staticmethod
+    def _use_ipc_queue() -> bool:
+        """Check if IPC queue should be used instead of Ray RPC for enqueue."""
+        return os.environ.get("RAY_DEBUG_USE_IPC", "0") == "1"
+
+    def _setup_ipc_queue(self):
+        """Setup IPC queue client connection to receive requests."""
+        queue_addr = os.environ.get("RAY_IPC_REQUEST_QUEUE_ADDR")
+        queue_key_hex = os.environ.get("RAY_IPC_REQUEST_QUEUE_KEY")
+
+        # print(f"===Setting up IPC queue on Worker {self.global_rank}: Queue Address: {queue_addr}, Queue Key: {queue_key_hex}===")
+        
+        if queue_addr is None:
+            raise RuntimeError("RAY_DEBUG_USE_IPC=1 but RAY_IPC_REQUEST_QUEUE_ADDR not set")
+        
+        # Reconstruct the HMAC key from hex if present
+        queue_key = bytes.fromhex(queue_key_hex) if queue_key_hex else None
+        
+        self.request_queue = IpcQueue(
+            address=(queue_addr, queue_key),
+            is_server=False,
+            name=f"ray_worker_{self.global_rank}_request_queue"
+        )
+        
+        # Start thread to read from queue - using regular Thread like MPI path
+        # (not ManagedThread to reduce overhead)
+        import threading
+        self.request_reader_thread = threading.Thread(
+            target=self._request_reader_task,
+            daemon=True,
+            name=f"ray_worker_{self.global_rank}_request_reader"
+        )
+        self.request_reader_thread.start()
+
+    def _request_reader_task(self):
+        """Thread task to read requests from IPC queue.
+        
+        EXACT MPI REPLICATION: Pure tight blocking loop, no batching, no logic.
+        Just continuously drain IPC → enqueue to ExecutorRequestQueue.
+        """
+        import time
+        try:
+            logger.info(f"[Rank {self.global_rank}] Starting IPC queue reader (pure MPI replication)")
+            
+            # Instrumentation to measure bottleneck
+            drain_count = 0
+            drain_start = None
+            
+            # EXACT copy of MPI worker.py:409-421
+            while (req := self.request_queue.get()) is not None:
+                if drain_start is None:
+                    drain_start = time.perf_counter()
+                
+                drain_count += 1
+                
+                if isinstance(req, CancellingRequest):
+                    self.abort_request(req.id)
+                elif isinstance(req, GenerationRequest):
+                    try:
+                        result_wait_queue = getattr(req, '_result_queue', None)
+                        self._enqueue_request(req, result_wait_queue)
+                    except RequestError as e:
+                        logger.error(f"[Rank {self.global_rank}] enqueue_request failed: {e}")
+                else:
+                    logger.error(f"[Rank {self.global_rank}] Unknown request type: {type(req)}")
+                
+                # Log every 100 requests to see drain rate
+                if drain_count % 100 == 0:
+                    elapsed = time.perf_counter() - drain_start
+                    rate = drain_count / elapsed
+                    logger.info(f"[Rank {self.global_rank}] IPC reader drained {drain_count} requests in {elapsed:.3f}s ({rate:.1f} req/s)")
+            
+            logger.info(f"[Rank {self.global_rank}] Received None from IPC queue, stopping reader thread")
+        except Exception as e:
+            logger.error(f"[Rank {self.global_rank}] Error in request reader task: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+
+    @nvtx_range("ray_gpu_worker.enqueue_request")
     def enqueue_request(self,
                         request: GenerationRequest,
                         result_wait_queue: Queue | None = None) -> int:
@@ -213,6 +302,18 @@ class RayGPUWorker(BaseWorker):
             self.doing_shutdown = True
 
         logger.debug(f'Worker {self.rank} shutting down...')
+
+        # Close IPC queue if it exists
+        # This will cause the reader thread's blocking get() to return None or raise exception
+        if self.request_queue is not None:
+            self.request_queue.close()
+            self.request_queue = None
+        
+        # Wait for reader thread to finish
+        if self.request_reader_thread is not None and self.request_reader_thread.is_alive():
+            logger.info(f"[Rank {self.global_rank}] Waiting for IPC queue reader thread to finish")
+            self.request_reader_thread.join(timeout=5.0)
+            self.request_reader_thread = None
 
         if self.engine is not None:
             self.engine.shutdown()

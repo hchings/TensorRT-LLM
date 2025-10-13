@@ -7,21 +7,26 @@ except ModuleNotFoundError as e:
     e.msg = """Cannot import Ray. Please install 'ray' package to use ray orchestrator"""
     raise
 
+import time
+
 from ray.util.placement_group import (PlacementGroup,
                                       PlacementGroupSchedulingStrategy,
                                       get_current_placement_group,
                                       placement_group)
 
 from tensorrt_llm._ray_utils import unwrap_ray_errors
+from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
 from tensorrt_llm._utils import get_free_port
 from tensorrt_llm.logger import logger
 
 from .._utils import nvtx_range_debug
 from .executor import GenerationExecutor
+from .ipc import IpcQueue
 from .postproc_worker import PostprocWorkerConfig
 from .ray_gpu_worker import RayGPUWorker, RayWorkerWrapper
 from .request import GenerationRequest
 from .result import GenerationResult, RayAsyncQueue, RaySyncQueue
+from tensorrt_llm._utils import nvtx_range
 
 __all__ = [
     "RayExecutor",
@@ -93,6 +98,13 @@ class RayExecutor(GenerationExecutor):
             self.response_queue.warmup.remote()
             self.response_sync_queue.warmup.remote()
 
+            # Setup IPC queue for request passing if enabled
+            self.request_queue = None
+            if self._use_ipc_queue():
+                print("==== Use IPC queue ====")
+                self.request_queue = IpcQueue(is_server=True,
+                                              name="ray_request_queue")
+
             worker_kwargs = dict(**worker_kwargs,
                                  postproc_worker_config=postproc_worker_config,
                                  is_llm_executor=is_llm_executor)
@@ -113,6 +125,10 @@ class RayExecutor(GenerationExecutor):
     def use_ray_queue(self) -> bool:
         return True
 
+    @staticmethod
+    def _use_ipc_queue() -> bool:
+        return os.environ.get("RAY_DEBUG_USE_IPC", "0") == "1"
+
     def create_workers(self, worker_cls, worker_kwargs):
         # When set to be a fraction, it allows Ray to schedule
         # multiple actors on a single GPU for colocate use cases.
@@ -126,9 +142,20 @@ class RayExecutor(GenerationExecutor):
             "MASTER_ADDR": self.master_address,  # head-IP for NCCL/Gloo
             "MASTER_PORT": str(self.master_port)
         })
+        
+        # Pass IPC queue address to workers if using IPC mode
+        if self._use_ipc_queue() and self.request_queue is not None:
+            runtime_env["env_vars"]["RAY_IPC_REQUEST_QUEUE_ADDR"] = self.request_queue.address[0]
+            print(f"==== IPC queue address: {self.request_queue.address[0]} ====")
+            if self.request_queue.address[1] is not None:
+                # Pass HMAC key as hex string
+                runtime_env["env_vars"]["RAY_IPC_REQUEST_QUEUE_KEY"] = self.request_queue.address[1].hex()
+                print(f"==== IPC queue key: {self.request_queue.address[1].hex()} ====")
 
         self.placement_group, self.bundle_indices = self._get_placement_group(
             tp_size=self.tp_size)
+
+        self.enqueue_timings = []
 
         self.workers = [
             RayWorkerWrapper.options(
@@ -188,6 +215,7 @@ class RayExecutor(GenerationExecutor):
                                                         **kwargs))
         return refs if non_block else ray.get(refs)
 
+    @nvtx_range("ray_executor.submit")
     def submit(self, request: GenerationRequest) -> GenerationResult:
         """
             Low-level API to the executor. Return a "future" GenerationResult
@@ -204,12 +232,30 @@ class RayExecutor(GenerationExecutor):
             disaggregated_params=request.disaggregated_params,
             logprob_params=logprob_params)
 
-        with nvtx_range_debug("request_queue.put"):
-            self.call_all_ray_workers("enqueue_request",
-                                      leader_only=True,
-                                      request=request,
-                                      async_call=False,
-                                      result_wait_queue=result.queue)
+        if request.timestamps is not None:
+            request.timestamps['executor_submit_request'] = time.time()
+
+        enqueue_start = time.perf_counter()
+        
+        if self._use_ipc_queue():
+            # Use IPC queue path (similar to MPI)
+            with nvtx_range_debug("request_queue.put"):
+                # Store result queue in request for worker to access
+                request._result_queue = result.queue
+                self.request_queue.put(request)
+        else:
+            # Use original Ray RPC path
+            with nvtx_range_debug("request_queue.put"):
+                self.call_all_ray_workers("enqueue_request",
+                                          leader_only=True,
+                                          request=request,
+                                          async_call=True,
+                                          result_wait_queue=result.queue)
+        
+        enqueue_elapsed = (time.perf_counter() - enqueue_start) * 1000
+
+        if is_timestamp_debug_enabled():
+            self.enqueue_timings.append(enqueue_elapsed)
 
         return result
 
@@ -226,7 +272,11 @@ class RayExecutor(GenerationExecutor):
                                   request_id=request_id)
 
     def shutdown(self):
-        # Release actors
+        # Close IPC queue if it was created
+        if hasattr(self, 'request_queue') and self.request_queue is not None:
+            self.request_queue.close()
+            self.request_queue = None
+            
         self.response_queue = None
         self.response_sync_queue = None
         self.async_response_queue_weakref = None

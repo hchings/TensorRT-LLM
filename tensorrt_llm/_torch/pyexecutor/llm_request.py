@@ -1,3 +1,4 @@
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
@@ -5,6 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 
 import tensorrt_llm.bindings
+from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
 from tensorrt_llm._torch.shared_tensor import SharedTensorContainer
 from tensorrt_llm.bindings import executor as tllm_executor
 from tensorrt_llm.executor.result import TokenLogprobs
@@ -403,6 +405,7 @@ class LlmResponse:
     error_msg: Optional[str] = None
     result: Optional[LlmResult] = None
     client_id: Optional[int] = None
+    timestamps: Optional[Dict[str, float]] = None
 
     def has_error(self):
         return self.error_msg is not None
@@ -452,6 +455,11 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         self.py_lora_path: str | None = kwargs.pop("py_lora_path", None)
         # Multimodal data
         self.py_multimodal_data = kwargs.pop("py_multimodal_data", None)
+
+        default_timestamps = {} if is_timestamp_debug_enabled() else None
+        self.py_timestamps: Dict[str,
+                                 float] = kwargs.pop("py_timestamps",
+                                                     default_timestamps)
         if llm_request is not None:
             super().__init__(llm_request)
         else:
@@ -588,11 +596,18 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         """
         result, is_final = super().create_serialized_result(
             use_fast_logits, mpi_world_rank)
-        return LlmResponse(
-            request_id=self.py_request_id
-            if self.is_child else self.parent_request_id,
-            result=LlmResult(result, self.py_result, is_final),
-            client_id=self.py_client_id) if len(result) > 0 else None
+
+        response_timestamps = self.py_timestamps.copy(
+        ) if self.py_timestamps is not None else None
+        if response_timestamps is not None:
+            response_timestamps['response_created'] = time.time()
+
+        return LlmResponse(request_id=self.py_request_id
+                           if self.is_child else self.parent_request_id,
+                           result=LlmResult(result, self.py_result, is_final),
+                           client_id=self.py_client_id,
+                           timestamps=response_timestamps if response_timestamps
+                           else None) if len(result) > 0 else None
 
     @property
     def is_dummy(self):
@@ -766,6 +781,15 @@ def executor_request_to_llm_request(
         py_multimodal_data=getattr(executor_request, "py_multimodal_data",
                                    None),
         kv_cache_retention_config=executor_request.kv_cache_retention_config)
+        py_timestamps=getattr(
+            executor_request, "py_timestamps", {
+                'scheduling_wait_time': 0.0,
+                'pre_forward_overhead': 0.0,
+                'forward_step_time': 0.0,
+                'post_processing_time': 0.0,
+                'num_iterations': 0,
+                'last_iteration_end': None,
+            } if is_timestamp_debug_enabled() else None))
     if child_req_ids:
         for child_id in child_req_ids:
             llm_request.create_child_request(child_id)

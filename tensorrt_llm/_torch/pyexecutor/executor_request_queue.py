@@ -71,6 +71,10 @@ class ExecutorRequestQueue:
 
         self._disable_mpi = mpi_disabled()
 
+        # DIAGNOSTIC: Track iteration count and timing per rank
+        # self.iteration_count = 0
+        # self.last_iteration_time = None
+
     def _get_from_request_queue(
             self,
             timeout: Optional[datetime.timedelta]) -> List[RequestQueueItem]:
@@ -218,6 +222,7 @@ class ExecutorRequestQueue:
         with self.enqueue_lock:
             assert self.active, "PyExecutor has already been shutdown."
             start_time = time.time()
+            request_queued_time = time.time()
             for request, query in requests_and_queries:
                 req_id = self._get_request_id()
                 if self.enable_iter_perf_stats:
@@ -229,6 +234,14 @@ class ExecutorRequestQueue:
                                      request,
                                      child_req_ids=child_req_ids,
                                      query=query))
+
+                if hasattr(
+                        request,
+                        'py_timestamps') and request.py_timestamps is not None:
+                    if 'request_queued' not in request.py_timestamps:
+                        request.py_timestamps[
+                            'request_queued'] = request_queued_time
+
                 req_ids.append(req_id)
         return req_ids
 
@@ -268,15 +281,31 @@ class ExecutorRequestQueue:
         all_ranks_num_active_requests: Optional[List[int]] = None
     ) -> List[RequestQueueItem]:
         """Common logic for fetching and processing requests from the queue."""
+        # # DIAGNOSTIC: Track iteration timing
+        # import time as time_module
+        # fetch_start = time_module.time()
+        # self.iteration_count += 1
+
+        # # Track time between iterations
+        # if self.last_iteration_time is not None:
+        #     iteration_gap_ms = (fetch_start - self.last_iteration_time) * 1000
+        # else:
+        #     iteration_gap_ms = 0
+        # self.last_iteration_time = fetch_start
+
         # Calculate timeout
-        idle = (total_num_active_requests == 0) and len(self.waiting_queue) == 0
-        if idle:
-            # In Ray path (TLLM_DISABLE_MPI=1), use a periodic heartbeat timeout so rank 0
-            # reaches the broadcast path regularly to prevent trtllm-serve timeout when idle.
-            timeout = datetime.timedelta(
-                seconds=1200) if self._disable_mpi else None
-        else:
-            timeout = datetime.timedelta(0)
+
+        # Tentatively revert this to rule this out.
+        timeout = None if (total_num_active_requests == 0) and len(
+            self.waiting_queue) == 0 else datetime.timedelta(0)
+        # idle = (total_num_active_requests == 0) and len(self.waiting_queue) == 0
+        # if idle:
+        #     # In Ray path (TLLM_DISABLE_MPI=1), use a periodic heartbeat timeout so rank 0
+        #     # reaches the broadcast path regularly to prevent trtllm-serve timeout when idle.
+        #     timeout = datetime.timedelta(
+        #         seconds=1200) if self._disable_mpi else None
+        # else:
+        #     timeout = datetime.timedelta(0)
 
         # Fetch requests from rank 0
         new_requests = []
@@ -284,8 +313,17 @@ class ExecutorRequestQueue:
             new_requests = self._get_from_request_queue(timeout)
 
         # Broadcast requests and handle Python objects
+        # DIAGNOSTIC: Measure broadcast time
+        # import time as time_module
+        # broadcast_start = time_module.time()
         new_requests, py_request_objects = self._handle_request_broadcasting(
             new_requests)
+        # broadcast_end = time_module.time()
+        # broadcast_duration_ms = (broadcast_end - broadcast_start) * 1000
+        # if broadcast_duration_ms > 100:  # Log if > 100ms from BOTH ranks
+        #     print(
+        #         f"[BROADCAST_DELAY][Rank {self.dist.rank}][Iter {self.iteration_count}] Broadcast took {broadcast_duration_ms:.2f} ms, num_requests={len(new_requests)}",
+        #         flush=True)
 
         # Validate and filter requests
         new_requests = self._validate_and_filter_requests(new_requests)
@@ -306,6 +344,16 @@ class ExecutorRequestQueue:
         # Update performance metrics
         if self.enable_iter_perf_stats and self.dist.rank == 0:
             self._update_new_active_requests_queue_latency(new_requests)
+
+        # DIAGNOSTIC: Log total fetch time
+        # fetch_end = time_module.time()
+        # fetch_total_ms = (fetch_end - fetch_start) * 1000
+        # if fetch_total_ms > 100 or self.iteration_count % 10 == 0:  # Log if > 100ms or every 10 iterations from BOTH ranks
+        #     print(
+        #         f"[FETCH_TIMING][Rank {self.dist.rank}][Iter {self.iteration_count}] "
+        #         f"gap_since_last_iter={iteration_gap_ms:.2f}ms, fetch_took={fetch_total_ms:.2f}ms, "
+        #         f"active_reqs={total_num_active_requests}, fetched={len(new_requests)}, queue_size={self.request_queue.qsize()}",
+        #         flush=True)
 
         return new_requests
 
