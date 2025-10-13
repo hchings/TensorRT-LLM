@@ -44,6 +44,7 @@ class LlmManager:
         self.streaming = streaming
         self.request_seen = asyncio.Event()
         self.modality = modality
+        self.all_timestamps: List = []  # Collect timestamps for analysis
 
     async def process_request(self, request: InferenceRequest,
                               sampling_params: SamplingParams,
@@ -73,6 +74,10 @@ class LlmManager:
                 response: RequestOutput = await output.aresult()
 
         response_end_timestamp = time.perf_counter_ns()
+
+        # Collect timestamps for detailed latency analysis
+        if response.outputs and response.outputs[0].timestamps:
+            self.all_timestamps.append(response.outputs[0].timestamps)
 
         # Mark that the response returned. Construct a record to send to statistics.
         tokens = list(chain(*(beam.token_ids for beam in response.outputs)))
@@ -292,6 +297,8 @@ async def async_benchmark(
         assert finished_requests == len(requests), "Benchmark failed"
         logger.info("Benchmark complete.")
 
+        # Attach collected timestamps to statistics for optional analysis
+        statistics.all_timestamps = backend.all_timestamps
         return statistics
 
     finally:

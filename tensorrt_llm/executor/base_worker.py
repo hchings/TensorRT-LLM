@@ -2,6 +2,7 @@ import copy
 import datetime
 import enum
 import json
+import time
 import weakref
 from pathlib import Path
 from queue import Queue
@@ -512,6 +513,11 @@ class BaseWorker(GenerationExecutor):
             if request.arrival_time is not None:
                 executor_request.py_arrival_time = request.arrival_time
 
+            if self._is_pytorch_backend and hasattr(request, 'timestamps'):
+                executor_request.py_timestamps = request.timestamps
+
+            request.timestamps['worker_enqueue_request'] = time.time()
+
             if request.query_token_ids is not None:
                 # pytorch star attention workflow
                 # a workaround to avoid public interface update
@@ -837,6 +843,13 @@ def _send_rsp(
     # if postproc_batches is set, append to batch instead of putting to IpcQueue
 
     if worker.result_queue is not None:
+        if hasattr(response, 'timestamps') and response.timestamps:
+            response.timestamps['response_enqueued'] = time.time()
+        elif isinstance(response, ResponseWrapper) and hasattr(
+                response._response,
+                'timestamps') and response._response.timestamps:
+            response._response.timestamps['response_enqueued'] = time.time()
+
         if rsp_batch is not None:
             rsp_batch.append(response)
         else:
@@ -855,6 +868,13 @@ def _send_rsp(
             streaming=worker._results.get(response.client_id, None)._streaming)
 
         pid = response.client_id % worker.postproc_config.num_postprocess_workers
+
+        if hasattr(response, 'timestamps') and response.timestamps:
+            response.timestamps['response_enqueued'] = time.time()
+        elif isinstance(response, ResponseWrapper) and hasattr(
+                response._response,
+                'timestamps') and response._response.timestamps:
+            response._response.timestamps['response_enqueued'] = time.time()
 
         if not postproc_batches:
             # Group the responses into buckets for the postprocessing steps.

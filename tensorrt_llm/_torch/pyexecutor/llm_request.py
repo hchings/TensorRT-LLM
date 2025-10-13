@@ -1,3 +1,4 @@
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
@@ -402,6 +403,7 @@ class LlmResponse:
     error_msg: Optional[str] = None
     result: Optional[LlmResult] = None
     client_id: Optional[int] = None
+    timestamps: Optional[Dict[str, float]] = None
 
     def has_error(self):
         return self.error_msg is not None
@@ -451,6 +453,8 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         self.py_lora_path: str | None = kwargs.pop("py_lora_path", None)
         # Multimodal data
         self.py_multimodal_data = kwargs.pop("py_multimodal_data", None)
+
+        self.py_timestamps: Dict[str, float] = kwargs.pop("py_timestamps", {})
         if llm_request is not None:
             super().__init__(llm_request)
         else:
@@ -571,11 +575,18 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         """
         result, is_final = super().create_serialized_result(
             use_fast_logits, mpi_world_rank)
-        return LlmResponse(
-            request_id=self.py_request_id
-            if self.is_child else self.parent_request_id,
-            result=LlmResult(result, self.py_result, is_final),
-            client_id=self.py_client_id) if len(result) > 0 else None
+
+        response_timestamps = self.py_timestamps.copy() if hasattr(
+            self, 'py_timestamps') else {}
+        if response_timestamps:
+            response_timestamps['response_created'] = time.time()
+
+        return LlmResponse(request_id=self.py_request_id
+                           if self.is_child else self.parent_request_id,
+                           result=LlmResult(result, self.py_result, is_final),
+                           client_id=self.py_client_id,
+                           timestamps=response_timestamps if response_timestamps
+                           else None) if len(result) > 0 else None
 
     @property
     def is_dummy(self):
@@ -747,7 +758,8 @@ def executor_request_to_llm_request(
         cache_salt_id=executor_request.cache_salt_id,
         arrival_time=getattr(executor_request, "py_arrival_time", None),
         py_multimodal_data=getattr(executor_request, "py_multimodal_data",
-                                   None))
+                                   None),
+        py_timestamps=getattr(executor_request, "py_timestamps", {}))
     if child_req_ids:
         for child_id in child_req_ids:
             llm_request.create_child_request(child_id)

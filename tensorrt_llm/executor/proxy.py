@@ -436,6 +436,7 @@ class GenerationExecutorProxy(GenerationExecutor):
             logprob_params=logprob_params)
         self._results[request.id] = result
 
+        request.timestamps['executor_submit_request'] = time.time()
         with nvtx_range_debug("request_queue.put"):
             self.request_queue.put(request)
 

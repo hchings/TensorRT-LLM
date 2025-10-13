@@ -7,6 +7,8 @@ except ModuleNotFoundError as e:
     e.msg = """Cannot import Ray. Please install 'ray' package to use ray orchestrator"""
     raise
 
+import time
+
 from ray.util.placement_group import (PlacementGroup,
                                       PlacementGroupSchedulingStrategy,
                                       get_current_placement_group,
@@ -192,6 +194,8 @@ class RayExecutor(GenerationExecutor):
             executor=self,
             disaggregated_params=request.disaggregated_params,
             logprob_params=logprob_params)
+
+        request.timestamps['executor_submit_request'] = time.time()
 
         with nvtx_range_debug("request_queue.put"):
             self.call_all_ray_workers("enqueue_request",
