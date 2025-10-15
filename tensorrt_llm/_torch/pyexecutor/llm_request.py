@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 
 import tensorrt_llm.bindings
+from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
 from tensorrt_llm._torch.shared_tensor import SharedTensorContainer
 from tensorrt_llm.bindings import executor as tllm_executor
 from tensorrt_llm.executor.result import TokenLogprobs
@@ -409,7 +410,10 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         # Multimodal data
         self.py_multimodal_data = kwargs.pop("py_multimodal_data", None)
 
-        self.py_timestamps: Dict[str, float] = kwargs.pop("py_timestamps", {})
+        default_timestamps = {} if is_timestamp_debug_enabled() else None
+        self.py_timestamps: Dict[str,
+                                 float] = kwargs.pop("py_timestamps",
+                                                     default_timestamps)
         if llm_request is not None:
             super().__init__(llm_request)
         else:
@@ -526,9 +530,8 @@ class LlmRequest(tensorrt_llm.bindings.internal.batch_manager.LlmRequest):
         result, is_final = super().create_serialized_result(
             use_fast_logits, mpi_world_rank)
 
-        response_timestamps = self.py_timestamps.copy() if hasattr(
-            self, 'py_timestamps') else {}
-        if response_timestamps:
+        response_timestamps = self.py_timestamps.copy() if self.py_timestamps is not None else None
+        if response_timestamps is not None:
             response_timestamps['response_created'] = time.time()
 
         return LlmResponse(request_id=self.py_request_id
@@ -704,7 +707,8 @@ def executor_request_to_llm_request(
         arrival_time=getattr(executor_request, "py_arrival_time", None),
         py_multimodal_data=getattr(executor_request, "py_multimodal_data",
                                    None),
-        py_timestamps=getattr(executor_request, "py_timestamps", {}))
+        py_timestamps=getattr(executor_request, "py_timestamps",
+                              {} if is_timestamp_debug_enabled() else None))
     if child_req_ids:
         for child_id in child_req_ids:
             llm_request.create_child_request(child_id)

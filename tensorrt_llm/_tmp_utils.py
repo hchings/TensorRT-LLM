@@ -2,8 +2,14 @@
 Temporary utilities for timestamp analysis and Ray vs MPI latency comparison.
 """
 import json
+import os
+from collections import Counter
 
 from tensorrt_llm._utils import mpi_disabled
+
+
+def is_timestamp_debug_enabled():
+    return os.environ.get('TIMESTAMP_DEBUG', '0') == '1'
 
 
 def calculate_latencies(timestamps):
@@ -23,18 +29,35 @@ def calculate_latencies(timestamps):
             timestamps['worker_enqueue_request'] -
             timestamps['executor_submit_request']) * 1000
 
-    # Enqueue overhead: from worker enqueue to request queued
-    if 'worker_enqueue_request' in timestamps and 'request_queued' in timestamps:
-        latencies['enqueue_overhead'] = (
-            timestamps['request_queued'] -
-            timestamps['worker_enqueue_request']) * 1000
-
     # Queue wait time: from queued to fetched
     if 'request_queued' in timestamps and 'request_fetched' in timestamps:
         latencies['queue_wait_time'] = (timestamps['request_fetched'] -
                                         timestamps['request_queued']) * 1000
 
-    # Execution time: from fetched to response created (actual GPU execution)
+    # Scheduling wait time: from fetched to scheduled (multi-iteration wait)
+    if 'request_fetched' in timestamps and 'batch_scheduled_time' in timestamps:
+        latencies['scheduling_wait_time'] = (
+            timestamps['batch_scheduled_time'] -
+            timestamps['request_fetched']) * 1000
+
+    # Pre-forward overhead: from scheduled to forward step start (same iteration)
+    if 'batch_scheduled_time' in timestamps and 'forward_step_start' in timestamps:
+        latencies['pre_forward_overhead'] = (
+            timestamps['forward_step_start'] -
+            timestamps['batch_scheduled_time']) * 1000
+
+    # Forward step time: actual GPU compute
+    if 'forward_step_start' in timestamps and 'forward_step_end' in timestamps:
+        latencies['forward_step_time'] = (
+            timestamps['forward_step_end'] -
+            timestamps['forward_step_start']) * 1000
+
+    # Post-processing time: from forward end to response created
+    if 'forward_step_end' in timestamps and 'response_created' in timestamps:
+        latencies['post_processing_time'] = (timestamps['response_created'] -
+                                             timestamps['forward_step_end']) * 1000
+
+    # Execution time: from fetched to response created (total execution)
     if 'request_fetched' in timestamps and 'response_created' in timestamps:
         latencies['execution_time'] = (timestamps['response_created'] -
                                        timestamps['request_fetched']) * 1000
@@ -74,6 +97,9 @@ def analyze_average_timestamps(all_timestamps):
     Calculate and print average latencies across all requests.
     all_timestamps: list of timestamp dicts from each request
     """
+    if not is_timestamp_debug_enabled():
+        return
+
     if not all_timestamps:
         print("No timestamps available")
         return
@@ -96,12 +122,15 @@ def analyze_average_timestamps(all_timestamps):
     print(f"\n=== Average Latency Breakdown (milliseconds) ===")
 
     metrics = [
-        ('submit_request_to_enqueue', 'Submit to enqueue (comm)'),
-        ('enqueue_overhead', 'Enqueue overhead'),
-        ('queue_wait_time', 'Queue wait time'),
-        ('execution_time', 'Execution (actual GPU)'),
+        ('submit_request_to_enqueue', 'Submit to enqueue'),
+        ('queue_wait_time', 'Request Queue wait time'),
+        ('execution_time', 'Total execution time'),
+        ('scheduling_wait_time', '  ├─ Scheduling wait time'),
+        ('pre_forward_overhead', '  ├─ Pre-forward overhead'),
+        ('forward_step_time', '  ├─ Forward step'),
+        ('post_processing_time', '  └─ Post-processing time'),
         ('response_handling', 'Response handling'),
-        ('enqueue_response_to_handle', 'Enqueue to handle (comm)'),
+        ('enqueue_response_to_handle', 'Enqueue to handle'),
         ('total_e2e', 'Total E2E latency'),
         ('communication_overhead', 'Total communication overhead'),
     ]
@@ -127,6 +156,9 @@ def analyze_average_timestamps(all_timestamps):
 
 def dump_timestamps_to_json(all_timestamps,
                             output_file="timestamps_output.json"):
+    if not is_timestamp_debug_enabled():
+        return
+
     if not all_timestamps:
         print("No timestamps to dump")
         return
@@ -137,3 +169,26 @@ def dump_timestamps_to_json(all_timestamps,
     with open(output_file, 'w') as f:
         json.dump(all_timestamps, f, indent=2)
     print(f"Timestamps saved to {output_file}")
+
+
+def print_fetch_statistics(num_fetched_requests, fetch_call_count, rank=None):
+    if not is_timestamp_debug_enabled():
+        return
+
+    if not num_fetched_requests:
+        return
+
+    rank_str = f"[Rank {rank}]" if rank is not None else ""
+    mode = "[Ray]" if mpi_disabled() else "[MPI]"
+
+    print(f"\n=== {mode}{rank_str} Fetch Request Statistics ===")
+    print(f"  Total fetch calls: {fetch_call_count}")
+
+    size_distribution = Counter(num_fetched_requests)
+    print(f"\n  Fetch Size Distribution:")
+    for size in sorted(size_distribution.keys()):
+        count = size_distribution[size]
+        percentage = (count / len(num_fetched_requests)) * 100
+        print(f"    {size:3d} requests: {count:5d} times ({percentage:5.1f}%)")
+
+    print("=" * 70)

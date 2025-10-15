@@ -512,10 +512,12 @@ class BaseWorker(GenerationExecutor):
             if request.arrival_time is not None:
                 executor_request.py_arrival_time = request.arrival_time
 
-            if self._is_pytorch_backend and hasattr(request, 'timestamps'):
+            if self._is_pytorch_backend and hasattr(
+                    request, 'timestamps') and request.timestamps is not None:
                 executor_request.py_timestamps = request.timestamps
 
-            request.timestamps['worker_enqueue_request'] = time.time()
+            if request.timestamps is not None:
+                request.timestamps['worker_enqueue_request'] = time.time()
 
             if request.query_token_ids is not None:
                 # pytorch star attention workflow
@@ -607,6 +609,16 @@ class BaseWorker(GenerationExecutor):
     def _pop_result(self, client_id: int):
         self._results.pop(client_id, None)
         self._client_id_to_request_id.pop(client_id, None)
+
+    def get_fetch_statistics(self):
+        if hasattr(self.engine, 'num_fetched_requests') and hasattr(
+                self.engine, 'fetch_call_count'):
+            return {
+                'num_fetched_requests': self.engine.num_fetched_requests,
+                'fetch_call_count': self.engine.fetch_call_count,
+                'rank': self.rank
+            }
+        return None
 
     def __enter__(self):
         return self

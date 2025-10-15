@@ -7,6 +7,7 @@ import torch
 
 from tensorrt_llm.inputs.multimodal import MultimodalParams
 
+from .._tmp_utils import is_timestamp_debug_enabled
 from ..disaggregated_params import DisaggregatedParams
 from ..llmapi.llm_utils import KvCacheRetentionConfig
 from ..sampling_params import SamplingParams
@@ -127,8 +128,8 @@ class GenerationRequest:
         self.cache_salt_id = cache_salt_id
         self.arrival_time = arrival_time
 
-        # tmp
-        self.timestamps: Dict[str, float] = {}
+        self.timestamps: Dict[
+            str, float] = {} if is_timestamp_debug_enabled() else None
 
     def set_id(self, id):
         assert self.id is None, f"Request ID is already set: {self.id}"

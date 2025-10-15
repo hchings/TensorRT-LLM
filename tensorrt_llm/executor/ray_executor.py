@@ -195,7 +195,8 @@ class RayExecutor(GenerationExecutor):
             disaggregated_params=request.disaggregated_params,
             logprob_params=logprob_params)
 
-        request.timestamps['executor_submit_request'] = time.time()
+        if request.timestamps is not None:
+            request.timestamps['executor_submit_request'] = time.time()
 
         with nvtx_range_debug("request_queue.put"):
             self.call_all_ray_workers("enqueue_request",

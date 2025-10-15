@@ -17,6 +17,8 @@ try:
 except ModuleNotFoundError:
     from tensorrt_llm import ray_stub as ray
 
+from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
+
 from .._utils import mpi_disabled, nvtx_range_debug
 from ..bindings import executor as tllm
 from ..disaggregated_params import DisaggregatedParams
@@ -125,7 +127,8 @@ class CompletionOutput:
     generation_logits: Optional[torch.Tensor] = None
     disaggregated_params: Optional[DisaggregatedParams] = None
     request_perf_metrics: Optional[tllm.RequestPerfMetrics] = None
-    timestamps: Optional[Dict[str, float]] = field(default_factory=dict)
+    timestamps: Optional[Dict[str, float]] = field(
+        default_factory=lambda: {} if is_timestamp_debug_enabled() else None)
 
     # hidden fields for tracking the diffs
     _last_text_len: int = field(default=0, init=False, repr=False)

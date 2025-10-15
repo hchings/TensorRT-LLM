@@ -20,6 +20,10 @@ try:
 except ImportError:
     from cuda import cudart
 
+import time
+
+from tensorrt_llm._tmp_utils import (is_timestamp_debug_enabled,
+                                     print_fetch_statistics)
 from tensorrt_llm._torch.pyexecutor.resource_manager import (
     ResourceManagerType, request_context)
 from tensorrt_llm._utils import (customized_gc_thresholds, is_trace_enabled,
@@ -188,6 +192,13 @@ class PyExecutor:
         self.guided_decoder = guided_decoder
         self.dist = dist
         self.disable_overlap_scheduler = disable_overlap_scheduler
+
+        if is_timestamp_debug_enabled():
+            self.num_fetched_requests = []
+            self.fetch_call_count = 0
+        else:
+            self.num_fetched_requests = None
+            self.fetch_call_count = None
 
         # enqueue and _fetch_new_requests used data
         self.active = True
@@ -792,6 +803,7 @@ class PyExecutor:
         # ensure the context is created, otherwise, some MPI calls will fail.
         CUASSERT(cudart.cudaSetDevice(self.device_id))
         microbatch_id = 0
+        timestamp_enabled = is_timestamp_debug_enabled()
         with self._profiler() as profile_step:
             iter_start_time = time.time()
             iter_stats = None
@@ -800,6 +812,11 @@ class PyExecutor:
                 if self.enable_iter_perf_stats:
                     iter_start_time = time.time()
                 new_requests = self._fetch_and_activate_new_requests()
+
+                if self.fetch_call_count is not None:
+                    self.fetch_call_count += 1
+                    self.num_fetched_requests.append(len(new_requests))
+
                 if self.should_stop_processing:
                     break
 
@@ -816,6 +833,8 @@ class PyExecutor:
 
                 scheduled_batch, fitting_disagg_gen_init_requests, num_fitting_reqs = self._schedule(
                 )
+
+                batch_scheduled_time = time.time() if timestamp_enabled else None
 
                 if self.kv_cache_transceiver:
                     # For requests that are fitting disagg gen init, also prepare resources for KV cache manager
@@ -994,6 +1013,10 @@ class PyExecutor:
                                              self.active_requests,
                                              previous_batch)
 
+        print_fetch_statistics(self.num_fetched_requests,
+                               self.fetch_call_count,
+                               rank=self.dist.rank)
+
     def wait_on_pp_send_handles(self, microbatch_id):
         if self.send_handles[microbatch_id] is not None:
             self.send_handles[microbatch_id].wait()
@@ -1001,8 +1024,9 @@ class PyExecutor:
 
     def _prepare_and_schedule_batch(self):
         new_requests = self._fetch_and_activate_new_requests()
+        num_fetched = len(new_requests)
         if self.should_stop_processing:
-            return None, None
+            return None, None, num_fetched
 
         if self.kv_cache_transceiver:
             self._check_disagg_gen_transfer_status()
@@ -1061,7 +1085,7 @@ class PyExecutor:
             f'has {len(self.active_requests)} active_request, '
             f'scheduled {len(scheduled_batch.context_requests)} context requests and '
             f'{len(scheduled_batch.generation_requests)} generation requests')
-        return scheduled_batch, iter_stats
+        return scheduled_batch, iter_stats, num_fetched
 
     def _kv_connector_start_batch(self, scheduled_batch):
         if self.kv_connector_manager:
@@ -1086,6 +1110,7 @@ class PyExecutor:
         torch.cuda.set_device(self.device_id)
         # ensure the context is created, otherwise, some MPI calls will fail.
         CUASSERT(cudart.cudaSetDevice(self.device_id))
+        timestamp_enabled = is_timestamp_debug_enabled()
         with self._profiler() as profile_step:
             sample_state = None
             iter_start_time = time.time()
@@ -1095,9 +1120,17 @@ class PyExecutor:
                 if self.enable_iter_perf_stats:
                     iter_start_time = time.time()
 
-                scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
+                scheduled_batch, iter_stats, num_fetched = self._prepare_and_schedule_batch(
+                )
+
+                if self.fetch_call_count is not None:
+                    self.fetch_call_count += 1
+                    self.num_fetched_requests.append(num_fetched)
+
                 if scheduled_batch is None:
                     break
+
+                batch_scheduled_time = time.time() if timestamp_enabled else None
 
                 self._pause_requests(scheduled_batch.paused_requests)
 
@@ -1142,12 +1175,27 @@ class PyExecutor:
                             if hasattr(self.drafter, "guided_decoder"):
                                 self.guided_decoder.rollback_draft_tokens()
 
+                    if timestamp_enabled:
+                        forward_step_start = time.time()
+
                     batch_outputs = self._forward_step(scheduled_batch)
+
+                    if timestamp_enabled:
+                        forward_step_end = time.time()
+
                     if self.guided_decoder is not None:
                         self.guided_decoder.execute(batch_outputs['logits'])
 
                     sample_state = self._sample_async(scheduled_batch,
                                                       batch_outputs)
+
+                    if timestamp_enabled:
+                        for req in scheduled_batch.all_requests():
+                            if hasattr(req, 'py_timestamps') and req.py_timestamps is not None:
+                                req.py_timestamps['batch_scheduled_time'] = batch_scheduled_time
+                                req.py_timestamps['forward_step_start'] = forward_step_start
+                                req.py_timestamps['forward_step_end'] = forward_step_end
+
                     if self.drafter is not None:
                         self.drafter.run_drafter_post(scheduled_batch,
                                                       self.resource_manager,
@@ -1193,6 +1241,10 @@ class PyExecutor:
                                    iter_stats=iter_stats,
                                    iter_start_time=iter_start_time))
 
+        print_fetch_statistics(self.num_fetched_requests,
+                               self.fetch_call_count,
+                               rank=self.dist.rank)
+
     def _prepare_draft_requests(self):
         try:
             # Set draft tokens here to make the KV cache manager
@@ -1222,6 +1274,7 @@ class PyExecutor:
         torch.cuda.set_device(self.device_id)
         # ensure the context is created, otherwise, some MPI calls will fail.
         CUASSERT(cudart.cudaSetDevice(self.device_id))
+        timestamp_enabled = is_timestamp_debug_enabled()
         with self._profiler() as profile_step:
             iter_start_time = time.time()
             iter_stats = None
@@ -1231,7 +1284,13 @@ class PyExecutor:
                 if self.enable_iter_perf_stats:
                     iter_start_time = time.time()
 
-                scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
+                scheduled_batch, iter_stats, num_fetched = self._prepare_and_schedule_batch(
+                )
+
+                if self.fetch_call_count is not None:
+                    self.fetch_call_count += 1
+                    self.num_fetched_requests.append(num_fetched)
+
                 if scheduled_batch is None:
                     break
                 # In gen-only benchmarking mode, wait until the number of scheduled generation
@@ -1264,6 +1323,8 @@ class PyExecutor:
                             continue
                         else:
                             can_forward = True
+
+                batch_scheduled_time = time.time() if timestamp_enabled else None
 
                 self._pause_requests(scheduled_batch.paused_requests)
 
@@ -1316,8 +1377,14 @@ class PyExecutor:
                     else:
                         previous_tensors_device = self.previous_batch and self.previous_batch.sample_state and self.previous_batch.sample_state.device
 
+                    if timestamp_enabled:
+                        forward_step_start = time.time()
+
                     batch_outputs = self._forward_step(scheduled_batch,
                                                        previous_tensors_device)
+
+                    if timestamp_enabled:
+                        forward_step_end = time.time()
 
                     if target_inputs is not None:
                         self._process_draft_results(scheduled_batch,
@@ -1342,6 +1409,14 @@ class PyExecutor:
 
                     sample_state = self._sample_async(scheduled_batch,
                                                       batch_outputs)
+
+                    if timestamp_enabled:
+                        for req in scheduled_batch.all_requests():
+                            if hasattr(req, 'py_timestamps') and req.py_timestamps is not None:
+                                req.py_timestamps['batch_scheduled_time'] = batch_scheduled_time
+                                req.py_timestamps['forward_step_start'] = forward_step_start
+                                req.py_timestamps['forward_step_end'] = forward_step_end
+
                     assert sample_state is not None, "Sampling failed"
 
                     self._update_request_states(scheduled_batch)
@@ -1367,6 +1442,10 @@ class PyExecutor:
                     self._terminate_ctx_finished_requests()
 
                 self._kv_connector_terminate_requests()
+
+        print_fetch_statistics(self.num_fetched_requests,
+                               self.fetch_call_count,
+                               rank=self.dist.rank)
 
     def _process_previous_batch(self):
         if self.kv_cache_transceiver and self.previous_batch.ctx_transmission_reqs:
@@ -1446,6 +1525,12 @@ class PyExecutor:
             request for request in new_requests_cur_rank
             if not _respond_if_invalid(request)
         ]
+
+        if is_timestamp_debug_enabled():
+            request_fetched = time.time()
+            for request in new_requests_cur_rank:
+                if hasattr(request, 'py_timestamps') and request.py_timestamps is not None:
+                    request.py_timestamps['request_fetched'] = request_fetched
 
         self.active_requests.extend(validated_requests)
         return validated_requests
@@ -1986,6 +2071,9 @@ class PyExecutor:
                             resp
                     ) == LlmResponse and req_id in self.result_wait_queues and self.result_wait_queues[
                             req_id] is not None:
+                        # Timestamp: Before Ray RPC to send response
+                        if hasattr(resp, 'timestamps') and resp.timestamps:
+                            resp.timestamps['response_enqueued'] = time.time()
                         self.result_wait_queues[req_id].put_response.remote(
                             resp.client_id, resp)
                 self.response_cv.notify_all()
