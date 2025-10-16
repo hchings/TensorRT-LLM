@@ -708,7 +708,14 @@ def executor_request_to_llm_request(
         py_multimodal_data=getattr(executor_request, "py_multimodal_data",
                                    None),
         py_timestamps=getattr(executor_request, "py_timestamps",
-                              {} if is_timestamp_debug_enabled() else None))
+                              {
+                                  'scheduling_wait_time': 0.0,
+                                  'pre_forward_overhead': 0.0,
+                                  'forward_step_time': 0.0,
+                                  'post_processing_time': 0.0,
+                                  'num_iterations': 0,
+                                  'last_iteration_end': None,
+                              } if is_timestamp_debug_enabled() else None))
     if child_req_ids:
         for child_id in child_req_ids:
             llm_request.create_child_request(child_id)

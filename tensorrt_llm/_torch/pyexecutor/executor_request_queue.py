@@ -236,7 +236,8 @@ class ExecutorRequestQueue:
                                      query=query))
 
                 if hasattr(request, 'py_timestamps') and request.py_timestamps is not None:
-                    request.py_timestamps['request_queued'] = request_queued_time
+                    if 'request_queued' not in request.py_timestamps:
+                        request.py_timestamps['request_queued'] = request_queued_time
 
                 req_ids.append(req_id)
         return req_ids

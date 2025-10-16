@@ -22,81 +22,43 @@ def calculate_latencies(timestamps):
 
     latencies = {}
 
-    # Calculate each metric using actual timestamp names
-    # Submit to enqueue: from executor submit to worker enqueue (Ray RPC or MPI IPC)
-    if 'executor_submit_request' in timestamps and 'worker_enqueue_request' in timestamps:
-        latencies['submit_request_to_enqueue'] = (
-            timestamps['worker_enqueue_request'] -
-            timestamps['executor_submit_request']) * 1000
+    latencies['submit_request_to_enqueue'] = (
+        timestamps['worker_enqueue_request'] -
+        timestamps['executor_submit_request']) * 1000
 
-    # Queue wait time: from queued to fetched
-    if 'request_queued' in timestamps and 'request_fetched' in timestamps:
-        latencies['queue_wait_time'] = (timestamps['request_fetched'] -
-                                        timestamps['request_queued']) * 1000
+    # only for the fetch
+    latencies['queue_wait_time'] = (timestamps['request_fetched'] -
+                                    timestamps['request_queued']) * 1000
 
-    # Scheduling wait time: from fetched to scheduled (multi-iteration wait)
-    if 'request_fetched' in timestamps and 'batch_scheduled_time' in timestamps:
-        latencies['scheduling_wait_time'] = (
-            timestamps['batch_scheduled_time'] -
-            timestamps['request_fetched']) * 1000
+    latencies['num_iterations'] = timestamps['num_iterations']
+    latencies['scheduling_wait_time'] = timestamps['scheduling_wait_time']
+    latencies['pre_forward_overhead'] = timestamps['pre_forward_overhead']
+    latencies['forward_step_time'] = timestamps['forward_step_time']
+    latencies['post_processing_time'] = timestamps['post_processing_time']
 
-    # Pre-forward overhead: from scheduled to forward step start (same iteration)
-    if 'batch_scheduled_time' in timestamps and 'forward_step_start' in timestamps:
-        latencies['pre_forward_overhead'] = (
-            timestamps['forward_step_start'] -
-            timestamps['batch_scheduled_time']) * 1000
+    latencies['execution_time'] = (timestamps['response_created'] -
+                                    timestamps['request_fetched']) * 1000
 
-    # Forward step time: actual GPU compute
-    if 'forward_step_start' in timestamps and 'forward_step_end' in timestamps:
-        latencies['forward_step_time'] = (
-            timestamps['forward_step_end'] -
-            timestamps['forward_step_start']) * 1000
+    latencies['response_handling'] = (timestamps['response_enqueued'] -
+                                        timestamps['response_created']) * 1000
 
-    # Post-processing time: from forward end to response created
-    if 'forward_step_end' in timestamps and 'response_created' in timestamps:
-        latencies['post_processing_time'] = (timestamps['response_created'] -
-                                             timestamps['forward_step_end']) * 1000
+    latencies['enqueue_response_to_handle'] = (
+        timestamps['handle_response'] -
+        timestamps['response_enqueued']) * 1000
 
-    # Execution time: from fetched to response created (total execution)
-    if 'request_fetched' in timestamps and 'response_created' in timestamps:
-        latencies['execution_time'] = (timestamps['response_created'] -
-                                       timestamps['request_fetched']) * 1000
+    latencies['total_e2e'] = (timestamps['handle_response'] -
+                              timestamps['executor_submit_request']) * 1000
 
-    # Response handling: from response created to enqueued (worker-side processing)
-    if 'response_created' in timestamps and 'response_enqueued' in timestamps:
-        latencies['response_handling'] = (timestamps['response_enqueued'] -
-                                          timestamps['response_created']) * 1000
-
-    # Enqueue response to handle: from response enqueued to client receives (Ray RPC or MPI IPC)
-    if 'response_enqueued' in timestamps and 'handle_response' in timestamps:
-        latencies['enqueue_response_to_handle'] = (
-            timestamps['handle_response'] -
-            timestamps['response_enqueued']) * 1000
-
-    # Total E2E latency: from executor submit to handle_response
-    if 'executor_submit_request' in timestamps and 'handle_response' in timestamps:
-        latencies['total_e2e'] = (timestamps['handle_response'] -
-                                  timestamps['executor_submit_request']) * 1000
-
-    # Calculate communication overhead (sum of both communication latencies: Ray RPC or MPI IPC)
-    if all(k in timestamps for k in [
-            'executor_submit_request', 'worker_enqueue_request',
-            'response_enqueued', 'handle_response'
-    ]):
-        latencies['communication_overhead'] = (
-            (timestamps['worker_enqueue_request'] -
-             timestamps['executor_submit_request']) +
-            (timestamps['handle_response'] -
-             timestamps['response_enqueued'])) * 1000
+    latencies['communication_overhead'] = (
+        (timestamps['worker_enqueue_request'] -
+            timestamps['executor_submit_request']) +
+        (timestamps['handle_response'] -
+            timestamps['response_enqueued'])) * 1000
 
     return latencies
 
 
 def analyze_average_timestamps(all_timestamps):
-    """
-    Calculate and print average latencies across all requests.
-    all_timestamps: list of timestamp dicts from each request
-    """
     if not is_timestamp_debug_enabled():
         return
 
@@ -105,8 +67,6 @@ def analyze_average_timestamps(all_timestamps):
         return
 
     mode = "[Ray]" if mpi_disabled() else "[MPI]"
-    print(f"\n=== {mode} Analyzing {len(all_timestamps)} requests ===")
-
     # Calculate latencies for each request
     all_latencies = []
     for ts in all_timestamps:
@@ -119,24 +79,26 @@ def analyze_average_timestamps(all_timestamps):
         return
 
     # Calculate averages
-    print(f"\n=== Average Latency Breakdown (milliseconds) ===")
+    print(f"\n=== [{mode}] Latency Breakdown (milliseconds) - Average over {len(all_timestamps)} request ===")
 
     metrics = [
         ('submit_request_to_enqueue', 'Submit to enqueue'),
-        ('queue_wait_time', 'Request Queue wait time'),
-        ('execution_time', 'Total execution time'),
-        ('scheduling_wait_time', '  ├─ Scheduling wait time'),
+        ('queue_wait_time', 'Request Queue wait (1st fetch)'),
+        ('execution_time', 'Time in executor loop (sum of all iterations)'),
+        ('scheduling_wait_time', '  ├─ Scheduling wait'),
         ('pre_forward_overhead', '  ├─ Pre-forward overhead'),
         ('forward_step_time', '  ├─ Forward step'),
-        ('post_processing_time', '  └─ Post-processing time'),
-        ('response_handling', 'Response handling'),
-        ('enqueue_response_to_handle', 'Enqueue to handle'),
-        ('total_e2e', 'Total E2E latency'),
-        ('communication_overhead', 'Total communication overhead'),
+        ('post_processing_time', '  └─ Post-processing'),
+        ('response_handling', 'Response handling (once)'),
+        ('enqueue_response_to_handle', 'Enqueue to handle (once)'),
+        # ('num_iterations', 'Avg iterations per request'),
+        # ('total_e2e', 'Total E2E latency'),
+        # ('communication_overhead', 'Total communication overhead'),
     ]
 
     for metric_key, metric_name in metrics:
-        # Add separator before E2E metrics
+        if metric_key == 'num_iterations':
+            print("")
         if metric_key == 'total_e2e':
             print("  " + "-" * 68)
 
@@ -145,11 +107,14 @@ def analyze_average_timestamps(all_timestamps):
             avg = sum(values) / len(values)
             min_val = min(values)
             max_val = max(values)
-            # Calculate variance
             variance = sum((x - avg)**2 for x in values) / len(values)
-            print(
-                f"  {metric_name:32s}: {avg:8.3f} ms (min: {min_val:8.3f}, max: {max_val:9.3f}, var: {variance:10.3f})"
-            )
+            
+            if metric_key == 'num_iterations':
+                print(f"  {metric_name:48s}: {avg:8.1f} (min: {min_val:8.1f}, max: {max_val:9.1f})")
+            else:
+                print(
+                    f"  {metric_name:48s}: {avg:8.3f} ms (min: {min_val:8.3f}, max: {max_val:9.3f}, var: {variance:10.3f})"
+                )
 
     print("=" * 70)
 
