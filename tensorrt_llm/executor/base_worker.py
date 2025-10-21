@@ -558,7 +558,7 @@ class BaseWorker(GenerationExecutor):
         self._results[client_id] = result
 
         request_id = self._enqueue_request(request)
-        # request_id returned from backend is necessary for the abort_request method.
+
         self._client_id_to_request_id[client_id] = request_id
 
         self._handle_background_error()

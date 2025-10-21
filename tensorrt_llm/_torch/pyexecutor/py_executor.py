@@ -850,7 +850,8 @@ class PyExecutor:
                 scheduled_batch, fitting_disagg_gen_init_requests, num_fitting_reqs = self._schedule(
                 )
 
-                batch_scheduled_time = time.time() if timestamp_enabled else None
+                batch_scheduled_time = time.time(
+                ) if timestamp_enabled else None
 
                 if self.kv_cache_transceiver:
                     # For requests that are fitting disagg gen init, also prepare resources for KV cache manager
@@ -1151,7 +1152,8 @@ class PyExecutor:
                 if scheduled_batch is None:
                     break
 
-                batch_scheduled_time = time.time() if timestamp_enabled else None
+                batch_scheduled_time = time.time(
+                ) if timestamp_enabled else None
 
                 self._pause_requests(scheduled_batch.paused_requests)
 
@@ -1217,25 +1219,42 @@ class PyExecutor:
 
                     self._update_request_states(scheduled_batch)
                     self._update_requests(sample_state, self.resource_manager)
-                    
+
                     if timestamp_enabled:
                         iteration_end = time.time()
                         for req in scheduled_batch.all_requests():
-                            if hasattr(req, 'py_timestamps') and req.py_timestamps is not None:
+                            if hasattr(req, 'py_timestamps'
+                                       ) and req.py_timestamps is not None:
                                 if 'batch_scheduled_time' not in req.py_timestamps:
-                                    req.py_timestamps['batch_scheduled_time'] = batch_scheduled_time
-                                
-                                if req.py_timestamps['last_iteration_end'] is None:
+                                    req.py_timestamps[
+                                        'batch_scheduled_time'] = batch_scheduled_time
+
+                                if req.py_timestamps[
+                                        'last_iteration_end'] is None:
                                     if 'request_fetched' in req.py_timestamps:
-                                        req.py_timestamps['scheduling_wait_time'] += (batch_scheduled_time - req.py_timestamps['request_fetched']) * 1000
+                                        req.py_timestamps[
+                                            'scheduling_wait_time'] += (
+                                                batch_scheduled_time - req.
+                                                py_timestamps['request_fetched']
+                                            ) * 1000
                                 else:
-                                    req.py_timestamps['scheduling_wait_time'] += (batch_scheduled_time - req.py_timestamps['last_iteration_end']) * 1000
-                                
-                                req.py_timestamps['pre_forward_overhead'] += (forward_step_start - batch_scheduled_time) * 1000
-                                req.py_timestamps['forward_step_time'] += (forward_step_end - forward_step_start) * 1000
-                                req.py_timestamps['post_processing_time'] += (iteration_end - forward_step_end) * 1000
+                                    req.py_timestamps[
+                                        'scheduling_wait_time'] += (
+                                            batch_scheduled_time - req.
+                                            py_timestamps['last_iteration_end']
+                                        ) * 1000
+
+                                req.py_timestamps['pre_forward_overhead'] += (
+                                    forward_step_start -
+                                    batch_scheduled_time) * 1000
+                                req.py_timestamps['forward_step_time'] += (
+                                    forward_step_end -
+                                    forward_step_start) * 1000
+                                req.py_timestamps['post_processing_time'] += (
+                                    iteration_end - forward_step_end) * 1000
                                 req.py_timestamps['num_iterations'] += 1
-                                req.py_timestamps['last_iteration_end'] = iteration_end
+                                req.py_timestamps[
+                                    'last_iteration_end'] = iteration_end
                     if self.block_reuse_enabled and not self.kv_cache_manager.is_vswa and self.kv_cache_transceiver:
                         for req in scheduled_batch.context_requests:
                             if req.is_context_only_request and (
@@ -1357,7 +1376,8 @@ class PyExecutor:
                         else:
                             can_forward = True
 
-                batch_scheduled_time = time.time() if timestamp_enabled else None
+                batch_scheduled_time = time.time(
+                ) if timestamp_enabled else None
 
                 self._pause_requests(scheduled_batch.paused_requests)
 
@@ -1446,25 +1466,42 @@ class PyExecutor:
                     assert sample_state is not None, "Sampling failed"
 
                     self._update_request_states(scheduled_batch)
-                    
+
                     if timestamp_enabled:
                         iteration_end = time.time()
                         for req in scheduled_batch.all_requests():
-                            if hasattr(req, 'py_timestamps') and req.py_timestamps is not None:
+                            if hasattr(req, 'py_timestamps'
+                                       ) and req.py_timestamps is not None:
                                 if 'batch_scheduled_time' not in req.py_timestamps:
-                                    req.py_timestamps['batch_scheduled_time'] = batch_scheduled_time
-                                
-                                if req.py_timestamps['last_iteration_end'] is None:
+                                    req.py_timestamps[
+                                        'batch_scheduled_time'] = batch_scheduled_time
+
+                                if req.py_timestamps[
+                                        'last_iteration_end'] is None:
                                     if 'request_fetched' in req.py_timestamps:
-                                        req.py_timestamps['scheduling_wait_time'] += (batch_scheduled_time - req.py_timestamps['request_fetched']) * 1000
+                                        req.py_timestamps[
+                                            'scheduling_wait_time'] += (
+                                                batch_scheduled_time - req.
+                                                py_timestamps['request_fetched']
+                                            ) * 1000
                                 else:
-                                    req.py_timestamps['scheduling_wait_time'] += (batch_scheduled_time - req.py_timestamps['last_iteration_end']) * 1000
-                                
-                                req.py_timestamps['pre_forward_overhead'] += (forward_step_start - batch_scheduled_time) * 1000
-                                req.py_timestamps['forward_step_time'] += (forward_step_end - forward_step_start) * 1000
-                                req.py_timestamps['post_processing_time'] += (iteration_end - forward_step_end) * 1000
+                                    req.py_timestamps[
+                                        'scheduling_wait_time'] += (
+                                            batch_scheduled_time - req.
+                                            py_timestamps['last_iteration_end']
+                                        ) * 1000
+
+                                req.py_timestamps['pre_forward_overhead'] += (
+                                    forward_step_start -
+                                    batch_scheduled_time) * 1000
+                                req.py_timestamps['forward_step_time'] += (
+                                    forward_step_end -
+                                    forward_step_start) * 1000
+                                req.py_timestamps['post_processing_time'] += (
+                                    iteration_end - forward_step_end) * 1000
                                 req.py_timestamps['num_iterations'] += 1
-                                req.py_timestamps['last_iteration_end'] = iteration_end
+                                req.py_timestamps[
+                                    'last_iteration_end'] = iteration_end
 
                     ctx_transmission_reqs = self._send_disagg_ctx_cache(
                         scheduled_batch.context_requests
@@ -1574,10 +1611,13 @@ class PyExecutor:
         if is_timestamp_debug_enabled():
             request_fetched = time.time()
             for request in validated_requests:
-                if hasattr(request, 'py_timestamps') and request.py_timestamps is not None:
+                if hasattr(
+                        request,
+                        'py_timestamps') and request.py_timestamps is not None:
                     if 'request_fetched' not in request.py_timestamps:
                         # only record the first fetch time of each request
-                        request.py_timestamps['request_fetched'] = request_fetched
+                        request.py_timestamps[
+                            'request_fetched'] = request_fetched
 
         self.active_requests.extend(validated_requests)
         return validated_requests

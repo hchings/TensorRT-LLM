@@ -37,23 +37,22 @@ def calculate_latencies(timestamps):
     latencies['post_processing_time'] = timestamps['post_processing_time']
 
     latencies['execution_time'] = (timestamps['response_created'] -
-                                    timestamps['request_fetched']) * 1000
+                                   timestamps['request_fetched']) * 1000
 
     latencies['response_handling'] = (timestamps['response_enqueued'] -
-                                        timestamps['response_created']) * 1000
+                                      timestamps['response_created']) * 1000
 
     latencies['enqueue_response_to_handle'] = (
-        timestamps['handle_response'] -
-        timestamps['response_enqueued']) * 1000
+        timestamps['handle_response'] - timestamps['response_enqueued']) * 1000
 
     latencies['total_e2e'] = (timestamps['handle_response'] -
                               timestamps['executor_submit_request']) * 1000
 
     latencies['communication_overhead'] = (
         (timestamps['worker_enqueue_request'] -
-            timestamps['executor_submit_request']) +
+         timestamps['executor_submit_request']) +
         (timestamps['handle_response'] -
-            timestamps['response_enqueued'])) * 1000
+         timestamps['response_enqueued'])) * 1000
 
     return latencies
 
@@ -79,7 +78,20 @@ def analyze_average_timestamps(all_timestamps):
         return
 
     # Calculate averages
-    print(f"\n=== [{mode}] Latency Breakdown (milliseconds) - Average over {len(all_timestamps)} request ===")
+    print(
+        f"\n=== [{mode}] Latency Breakdown (milliseconds) - Average over {len(all_timestamps)} request ==="
+    )
+
+    # Print first 20 submit_request_to_enqueue values
+    submit_to_enqueue_values = [
+        lat['submit_request_to_enqueue'] for lat in all_latencies
+        if 'submit_request_to_enqueue' in lat
+    ]
+    if submit_to_enqueue_values:
+        first_20 = ', '.join(
+            [f"{x:.2f}" for x in submit_to_enqueue_values[:20]])
+        print(f"  Submit to enqueue (first 20, ms): {first_20}", flush=True)
+        print(flush=True)
 
     metrics = [
         ('submit_request_to_enqueue', 'Submit to enqueue'),
@@ -108,9 +120,11 @@ def analyze_average_timestamps(all_timestamps):
             min_val = min(values)
             max_val = max(values)
             variance = sum((x - avg)**2 for x in values) / len(values)
-            
+
             if metric_key == 'num_iterations':
-                print(f"  {metric_name:48s}: {avg:8.1f} (min: {min_val:8.1f}, max: {max_val:9.1f})")
+                print(
+                    f"  {metric_name:48s}: {avg:8.1f} (min: {min_val:8.1f}, max: {max_val:9.1f})"
+                )
             else:
                 print(
                     f"  {metric_name:48s}: {avg:8.3f} ms (min: {min_val:8.3f}, max: {max_val:9.3f}, var: {variance:10.3f})"
@@ -156,4 +170,42 @@ def print_fetch_statistics(num_fetched_requests, fetch_call_count, rank=None):
         percentage = (count / len(num_fetched_requests)) * 100
         print(f"    {size:3d} requests: {count:5d} times ({percentage:5.1f}%)")
 
+    print(f"\n  Num fetched requests (all iterations): {num_fetched_requests}")
+
+    print("=" * 70)
+
+
+def print_enqueue_statistics(enqueue_timings):
+    if not is_timestamp_debug_enabled():
+        return
+
+    if not enqueue_timings:
+        return
+
+    mode = "[Ray]" if mpi_disabled() else "[MPI]"
+    num_requests = len(enqueue_timings)
+
+    print(
+        f"\n=== {mode} Enqueue Request Timing Statistics ({num_requests} requests) ==="
+    )
+    first_20_enqueue = ', '.join([f"{x:.2f}" for x in enqueue_timings[:20]])
+    print(f"  Direct enqueue (first 20, ms): {first_20_enqueue}", flush=True)
+
+    avg = sum(enqueue_timings) / num_requests
+    min_val = min(enqueue_timings)
+    max_val = max(enqueue_timings)
+
+    # Calculate percentiles
+    sorted_timings = sorted(enqueue_timings)
+    p10 = sorted_timings[int(num_requests *
+                             0.1)] if num_requests > 1 else sorted_timings[0]
+    p50 = sorted_timings[num_requests // 2]
+    p90 = sorted_timings[int(num_requests * 0.9)]
+
+    print(f"  Avg: {avg:.2f} ms")
+    print(f"  Min: {min_val:.2f} ms")
+    print(f"  Max: {max_val:.2f} ms")
+    print(f"  P10: {p10:.2f} ms")
+    print(f"  P50: {p50:.2f} ms")
+    print(f"  P90: {p90:.2f} ms")
     print("=" * 70)

@@ -6,13 +6,14 @@ import ray
 from tensorrt_llm import LLM, SamplingParams
 from tensorrt_llm._tmp_utils import (analyze_average_timestamps,
                                      dump_timestamps_to_json,
+                                     print_enqueue_statistics,
                                      print_fetch_statistics)
 from tensorrt_llm.llmapi import KvCacheConfig
 
 
 def main():
     # Configure KV cache memory usage fraction.
-    kv_cache_config = KvCacheConfig(free_gpu_memory_fraction=0.5,
+    kv_cache_config = KvCacheConfig(free_gpu_memory_fraction=0.8,
                                     max_tokens=4096,
                                     enable_block_reuse=True)
 
@@ -22,10 +23,10 @@ def main():
         # model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
         kv_cache_config=kv_cache_config,
         max_seq_len=1024,
-        max_batch_size=1,
+        # max_batch_size=1,
         orchestrator_type="ray",  # Enable Ray orchestrator
         # Enable 2-way tensor parallelism
-        tensor_parallel_size=2
+        # tensor_parallel_size=2
     )
 
     # Sample prompts.
@@ -33,7 +34,9 @@ def main():
         "Hello, my name is",
         "The capital of France is",
         "The future of AI is",
-    ]
+    ] * 1000
+
+    #* 100
 
     # Create a sampling params.
     sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
@@ -48,6 +51,10 @@ def main():
         if output.outputs[0].timestamps:
             all_timestamps.append(output.outputs[0].timestamps)
 
+        # print(
+        #     f"Prompt: {output.prompt!r}, Generated text: {output.outputs[0].text!r}"
+        # )
+
     async def main():
         tasks = [task(prompt) for prompt in prompts]
         await asyncio.gather(*tasks)
@@ -56,6 +63,9 @@ def main():
 
     analyze_average_timestamps(all_timestamps)
     dump_timestamps_to_json(all_timestamps, "timestamps_output.json")
+
+    if hasattr(llm._executor, 'enqueue_timings'):
+        print_enqueue_statistics(llm._executor.enqueue_timings)
 
     if hasattr(llm._executor, 'workers'):
         for i, worker in enumerate(llm._executor.workers):
