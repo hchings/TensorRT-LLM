@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import time
 import weakref
 from dataclasses import dataclass, field
 from queue import Empty, Queue
@@ -15,6 +16,8 @@ try:
     import ray
 except ModuleNotFoundError:
     from tensorrt_llm import ray_stub as ray
+
+from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
 
 from .._ray_utils import unwrap_ray_errors
 from .._utils import mpi_disabled, nvtx_range_debug
@@ -129,6 +132,8 @@ class CompletionOutput:
     additional_generation_outputs: Optional[Dict[str, torch.Tensor]] = None
     disaggregated_params: Optional[DisaggregatedParams] = None
     request_perf_metrics: Optional[tllm.RequestPerfMetrics] = None
+    timestamps: Optional[Dict[str, float]] = field(
+        default_factory=lambda: {} if is_timestamp_debug_enabled() else None)
 
     # hidden fields for tracking the diffs
     _last_text_len: int = field(default=0, init=False, repr=False)
@@ -513,6 +518,10 @@ class GenerationResultBase:
                 self._handle_sequence(finish_reasons, response_result,
                                       response_result.sequence_index,
                                       logprobs_result, req_perf_metrics_dict)
+
+            if hasattr(response, 'timestamps') and response.timestamps:
+                response.timestamps['handle_response'] = time.time()
+                self._outputs[0].timestamps = response.timestamps
 
             if response_result.context_logits is not None:
                 self._context_logits = response_result.context_logits

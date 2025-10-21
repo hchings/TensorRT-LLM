@@ -7,12 +7,15 @@ except ModuleNotFoundError as e:
     e.msg = """Cannot import Ray. Please install 'ray' package to use ray orchestrator"""
     raise
 
+import time
+
 from ray.util.placement_group import (PlacementGroup,
                                       PlacementGroupSchedulingStrategy,
                                       get_current_placement_group,
                                       placement_group)
 
 from tensorrt_llm._ray_utils import unwrap_ray_errors
+from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
 from tensorrt_llm._utils import get_free_port
 from tensorrt_llm.logger import logger
 
@@ -130,6 +133,8 @@ class RayExecutor(GenerationExecutor):
         self.placement_group, self.bundle_indices = self._get_placement_group(
             tp_size=self.tp_size)
 
+        self.enqueue_timings = []
+
         self.workers = [
             RayWorkerWrapper.options(
                 num_gpus=num_gpus,
@@ -204,12 +209,20 @@ class RayExecutor(GenerationExecutor):
             disaggregated_params=request.disaggregated_params,
             logprob_params=logprob_params)
 
+        if request.timestamps is not None:
+            request.timestamps['executor_submit_request'] = time.time()
+
+        rpc_start = time.perf_counter()
         with nvtx_range_debug("request_queue.put"):
             self.call_all_ray_workers("enqueue_request",
                                       leader_only=True,
                                       request=request,
                                       async_call=False,
                                       result_wait_queue=result.queue)
+        rpc_elapsed = (time.perf_counter() - rpc_start) * 1000
+
+        if is_timestamp_debug_enabled():
+            self.enqueue_timings.append(rpc_elapsed)
 
         return result
 
@@ -226,7 +239,6 @@ class RayExecutor(GenerationExecutor):
                                   request_id=request_id)
 
     def shutdown(self):
-        # Release actors
         self.response_queue = None
         self.response_sync_queue = None
         self.async_response_queue_weakref = None

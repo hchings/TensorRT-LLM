@@ -86,6 +86,9 @@ class GenerationExecutorProxy(GenerationExecutor):
 
         self.model_world_size = model_world_size
 
+        # Track enqueue timings for analysis
+        self.enqueue_timings = []
+
         self.garbage_collection_gen0_threshold = worker_kwargs[
             "llm_args"].garbage_collection_gen0_threshold if worker_kwargs.get(
                 "llm_args", None) is not None else None
@@ -435,8 +438,17 @@ class GenerationExecutorProxy(GenerationExecutor):
             logprob_params=logprob_params)
         self._results[request.id] = result
 
+        if request.timestamps is not None:
+            request.timestamps['executor_submit_request'] = time.time()
+
+        enqueue_start = time.perf_counter()
         with nvtx_range_debug("request_queue.put"):
             self.request_queue.put(request)
+        enqueue_elapsed = (time.perf_counter() - enqueue_start) * 1000
+
+        from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
+        if is_timestamp_debug_enabled():
+            self.enqueue_timings.append(enqueue_elapsed)
 
         self._handle_background_error()
 

@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 
 import click
+import ray
 from click_option_group import (MutuallyExclusiveOptionGroup, OptionGroup,
                                 optgroup)
 from huggingface_hub import snapshot_download
@@ -20,6 +21,12 @@ from tensorrt_llm.tools.importlib_utils import import_custom_module_from_dir
 from tensorrt_llm.bench.benchmark.utils.general import (
     get_settings_from_engine, get_settings, ALL_SUPPORTED_BACKENDS)
 # isort: on
+from tensorrt_llm._tmp_utils import (analyze_average_timestamps,
+                                     dump_timestamps_to_json,
+                                     is_timestamp_debug_enabled,
+                                     print_enqueue_statistics,
+                                     print_fetch_statistics)
+from tensorrt_llm._utils import mpi_disabled
 from tensorrt_llm.bench.benchmark.utils.general import (
     generate_warmup_dataset, update_sampler_args_with_extra_options)
 from tensorrt_llm.bench.dataclasses.configuration import RuntimeConfig
@@ -472,6 +479,49 @@ def throughput_command(
             options.request_json,
             partial(report_utility.get_request_info, tokenizer))
         report_utility.report_statistics()
+
+        if is_timestamp_debug_enabled() and hasattr(
+                statistics, 'all_timestamps') and statistics.all_timestamps:
+            logger.info("\n")
+            analyze_average_timestamps(statistics.all_timestamps)
+            dump_timestamps_to_json(statistics.all_timestamps,
+                                    "timestamps_output.json")
+
+            # Collect and print fetch statistics
+            try:
+                if hasattr(llm, '_executor'):
+                    executor = llm._executor
+                    if mpi_disabled():
+                        # Ray mode
+                        worker = executor.workers[0]
+                        stats = worker.call_worker_method.remote(
+                            'get_fetch_statistics')
+                        result = ray.get(stats)
+                        if result:
+                            print_fetch_statistics(
+                                result['num_fetched_requests'],
+                                result['fetch_call_count'],
+                                rank=result['rank'])
+                    else:
+                        # MPI mode
+                        stats = executor.get_fetch_statistics()
+                        if stats:
+                            print_fetch_statistics(
+                                stats['num_fetched_requests'],
+                                stats['fetch_call_count'],
+                                rank=stats['rank'])
+            except Exception as e:
+                logger.debug(f"Could not retrieve fetch statistics: {e}")
+
+            # Print enqueue timing statistics
+            try:
+                if hasattr(llm, '_executor'):
+                    executor = llm._executor
+                    if hasattr(executor,
+                               'enqueue_timings') and executor.enqueue_timings:
+                        print_enqueue_statistics(executor.enqueue_timings)
+            except Exception as e:
+                logger.debug(f"Could not retrieve enqueue statistics: {e}")
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt, exiting benchmark...")
     except Exception:
