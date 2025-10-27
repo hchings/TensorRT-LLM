@@ -11,7 +11,7 @@ import zmq.asyncio
 
 from tensorrt_llm.logger import logger
 
-from .._utils import customized_gc_thresholds, mpi_rank, nvtx_range_debug
+from .._utils import customized_gc_thresholds, mpi_rank, nvtx_range_debug, nvtx_range
 from ..llmapi.mpi_session import (MpiCommSession, MpiPoolSession, MpiSession,
                                   RemoteMpiCommSessionClient)
 from ..llmapi.tracer import enable_llm_tracer, get_tracer, global_tracer
@@ -84,6 +84,9 @@ class GenerationExecutorProxy(GenerationExecutor):
         self._results: Dict[int, GenerationResult] = {}
 
         self.model_world_size = model_world_size
+
+        # Track enqueue timings for analysis
+        self.enqueue_timings = []
 
         self.garbage_collection_gen0_threshold = worker_kwargs[
             "llm_args"].garbage_collection_gen0_threshold if worker_kwargs.get(
@@ -414,6 +417,7 @@ class GenerationExecutorProxy(GenerationExecutor):
         if enable_llm_debug():
             print_alive_threads()
 
+    @nvtx_range("proxy.submit")
     def submit(self, request: GenerationRequest) -> GenerationResult:
         """
             Low-level API to the executor. Return a "future" GenerationResult
@@ -434,8 +438,17 @@ class GenerationExecutorProxy(GenerationExecutor):
             logprob_params=logprob_params)
         self._results[request.id] = result
 
+        if request.timestamps is not None:
+            request.timestamps['executor_submit_request'] = time.time()
+
+        enqueue_start = time.perf_counter()
         with nvtx_range_debug("request_queue.put"):
             self.request_queue.put(request)
+        enqueue_elapsed = (time.perf_counter() - enqueue_start) * 1000
+
+        from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
+        if is_timestamp_debug_enabled():
+            self.enqueue_timings.append(enqueue_elapsed)
 
         self._handle_background_error()
 

@@ -2,6 +2,7 @@ import copy
 import datetime
 import enum
 import json
+import time
 import weakref
 from pathlib import Path
 from queue import Queue
@@ -35,6 +36,7 @@ from .result import (GenerationResult, LogProbsResult, ResponseWrapper,
                      compute_logprobs)
 from .utils import (ErrorResponse, IntraProcessQueue, RequestError,
                     is_llm_response)
+from tensorrt_llm._utils import nvtx_range
 
 __all__ = [
     "BaseWorker",
@@ -305,6 +307,7 @@ class BaseWorker(GenerationExecutor):
             model_config=self._runtime_model_config,
             uids=[str(prompt_adapter_request.adapter_id)])
 
+    @nvtx_range("base_worker.enqueue_request")
     def _enqueue_request(self,
                          request: GenerationRequest,
                          result_wait_queue=None) -> int:
@@ -502,6 +505,13 @@ class BaseWorker(GenerationExecutor):
             if request.arrival_time is not None:
                 executor_request.py_arrival_time = request.arrival_time
 
+            if self._is_pytorch_backend and hasattr(
+                    request, 'timestamps') and request.timestamps is not None:
+                executor_request.py_timestamps = request.timestamps
+
+            if request.timestamps is not None:
+                request.timestamps['worker_enqueue_request'] = time.time()
+
             if request.query_token_ids is not None:
                 # pytorch star attention workflow
                 # a workaround to avoid public interface update
@@ -550,7 +560,7 @@ class BaseWorker(GenerationExecutor):
         self._results[client_id] = result
 
         request_id = self._enqueue_request(request)
-        # request_id returned from backend is necessary for the abort_request method.
+
         self._client_id_to_request_id[client_id] = request_id
 
         self._handle_background_error()
@@ -592,6 +602,16 @@ class BaseWorker(GenerationExecutor):
     def _pop_result(self, client_id: int):
         self._results.pop(client_id, None)
         self._client_id_to_request_id.pop(client_id, None)
+
+    def get_fetch_statistics(self):
+        if hasattr(self.engine, 'num_fetched_requests') and hasattr(
+                self.engine, 'fetch_call_count'):
+            return {
+                'num_fetched_requests': self.engine.num_fetched_requests,
+                'fetch_call_count': self.engine.fetch_call_count,
+                'rank': self.rank
+            }
+        return None
 
     def __enter__(self):
         return self
@@ -826,6 +846,13 @@ def _send_rsp(
     # if postproc_batches is set, append to batch instead of putting to IpcQueue
 
     if worker.result_queue is not None:
+        if hasattr(response, 'timestamps') and response.timestamps:
+            response.timestamps['response_enqueued'] = time.time()
+        elif isinstance(response, ResponseWrapper) and hasattr(
+                response._response,
+                'timestamps') and response._response.timestamps:
+            response._response.timestamps['response_enqueued'] = time.time()
+
         if rsp_batch is not None:
             rsp_batch.append(response)
         else:
@@ -844,6 +871,13 @@ def _send_rsp(
             streaming=worker._results.get(response.client_id, None)._streaming)
 
         pid = response.client_id % worker.postproc_config.num_postprocess_workers
+
+        if hasattr(response, 'timestamps') and response.timestamps:
+            response.timestamps['response_enqueued'] = time.time()
+        elif isinstance(response, ResponseWrapper) and hasattr(
+                response._response,
+                'timestamps') and response._response.timestamps:
+            response._response.timestamps['response_enqueued'] = time.time()
 
         if not postproc_batches:
             # Group the responses into buckets for the postprocessing steps.

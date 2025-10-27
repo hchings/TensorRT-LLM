@@ -19,6 +19,8 @@ try:
 except ModuleNotFoundError:
     from tensorrt_llm import ray_stub as ray
 
+from tensorrt_llm._tmp_utils import is_timestamp_debug_enabled
+
 from .._ray_utils import unwrap_ray_errors
 from .._utils import mpi_disabled, nvtx_range_debug
 from ..bindings import executor as tllm
@@ -28,6 +30,7 @@ from ..llmapi.utils import AsyncQueue, print_traceback_on_error
 from ..metrics import MetricNames, MetricsCollector, RequestEventTiming
 from ..sampling_params import LogprobParams, SamplingParams
 from .utils import ErrorResponse, has_event_loop, is_llm_response
+from tensorrt_llm._utils import nvtx_range
 
 if TYPE_CHECKING:
     from .executor import GenerationExecutor
@@ -132,6 +135,8 @@ class CompletionOutput:
     additional_generation_outputs: Optional[Dict[str, torch.Tensor]] = None
     disaggregated_params: Optional[DisaggregatedParams] = None
     request_perf_metrics: Optional[tllm.RequestPerfMetrics] = None
+    timestamps: Optional[Dict[str, float]] = field(
+        default_factory=lambda: {} if is_timestamp_debug_enabled() else None)
 
     # hidden fields for tracking the diffs
     _last_text_len: int = field(default=0, init=False, repr=False)
@@ -280,8 +285,9 @@ class GenerationResultBase:
             else:
                 self.queue = ray_queue
                 self.aqueue = None
-            with unwrap_ray_errors():
-                ray.get(self.queue.register.remote(id))
+            with nvtx_range("result.ray_queue.register_id"):
+                with unwrap_ray_errors():
+                    ray.get(self.queue.register.remote(id))
         else:
             if has_event_loop():
                 self.aqueue = AsyncQueue()
@@ -518,6 +524,10 @@ class GenerationResultBase:
                 self._handle_sequence(finish_reasons, response_result,
                                       response_result.sequence_index,
                                       logprobs_result, req_perf_metrics_dict)
+
+            if hasattr(response, 'timestamps') and response.timestamps:
+                response.timestamps['handle_response'] = time.time()
+                self._outputs[0].timestamps = response.timestamps
 
             if response_result.context_logits is not None:
                 self._context_logits = response_result.context_logits
@@ -845,6 +855,7 @@ class GenerationResult(GenerationResultBase):
     def _handle_ray_response(self, response: Any):
         return response
 
+    @nvtx_range("result._result_step")
     def _result_step(self, timeout: Optional[float] = None):
         if mpi_disabled():
             with unwrap_ray_errors():

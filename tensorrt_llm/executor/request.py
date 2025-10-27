@@ -8,6 +8,7 @@ import torch
 
 from tensorrt_llm.inputs.multimodal import MultimodalParams
 
+from .._tmp_utils import is_timestamp_debug_enabled
 from ..disaggregated_params import DisaggregatedParams
 from ..llmapi.llm_utils import KvCacheRetentionConfig
 from ..sampling_params import SamplingParams
@@ -129,6 +130,18 @@ class GenerationRequest:
         self.scheduling_params = scheduling_params
         self.cache_salt_id = cache_salt_id
         self.arrival_time = arrival_time
+
+        if is_timestamp_debug_enabled():
+            self.timestamps = {
+                'scheduling_wait_time': 0.0,
+                'pre_forward_overhead': 0.0,
+                'forward_step_time': 0.0,
+                'post_processing_time': 0.0,
+                'num_iterations': 0,
+                'last_iteration_end': None,
+            }
+        else:
+            self.timestamps = None
 
     def set_id(self, id):
         assert self.id is None, f"Request ID is already set: {self.id}"
