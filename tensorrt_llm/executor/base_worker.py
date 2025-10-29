@@ -525,7 +525,9 @@ class BaseWorker(GenerationExecutor):
 
     def submit(self, request: GenerationRequest) -> GenerationResult:
         """ Low-level API to the executor. Return a "future" GenerationResult which can be waited. """
-        self.start()
+        # TODO Need fix. this is a good way to catch the poor error propogation issue.
+        # e.g., now RayGPUWorker doesn't not define start() but it won't error out and appeaer as hang.
+        # self.start()
 
         if self.rank != 0:
             raise RuntimeError(

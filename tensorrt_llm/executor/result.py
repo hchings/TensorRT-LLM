@@ -273,6 +273,8 @@ class GenerationResultBase:
         self.metrics_dict = {}
         self.trace_headers: Optional[dict[str, str]] = None
 
+        self._use_ray_queue = ray_queue is not None
+
         if ray_queue is not None:
             if has_event_loop():
                 self.aqueue = ray_queue
@@ -548,7 +550,7 @@ class GenerationResultBase:
         else:
             raise ValueError(f"Unknown response type: {response}")
 
-        if self._done and mpi_disabled():
+        if self._done and mpi_disabled() and self._use_ray_queue:
             assert hasattr(
                 self.queue, "unregister"
             ), "Ray path should be activated for unregistering the Ray queue."
@@ -846,7 +848,7 @@ class GenerationResult(GenerationResultBase):
         return response
 
     def _result_step(self, timeout: Optional[float] = None):
-        if mpi_disabled():
+        if mpi_disabled() and self._use_ray_queue:
             with unwrap_ray_errors():
                 response = ray.get(self.queue.get.remote(self.request_id))
             response = self._handle_ray_response(response)
@@ -857,7 +859,7 @@ class GenerationResult(GenerationResultBase):
 
     async def _aresult_step(self):
         assert self.aqueue is not None, "The asyncio event loop was not present during initialization, so async operations are not available."
-        if mpi_disabled():
+        if mpi_disabled() and self._use_ray_queue:
             response = await self.aqueue.get_async.remote(self.request_id)
             response = self._handle_ray_response(response)
         else:

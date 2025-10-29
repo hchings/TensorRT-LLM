@@ -524,6 +524,11 @@ def mpi_disabled() -> bool:
     return os.environ.get("TLLM_DISABLE_MPI") == "1"
 
 
+# TODO: remove tentative flag
+def ray_use_rpc() -> bool:
+    return os.environ.get("TLLM_RAY_USE_RPC") == "1"
+
+
 def mpi_rank():
     if mpi_disabled():
         try:
