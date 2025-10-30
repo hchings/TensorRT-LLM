@@ -220,7 +220,6 @@ class RayGPUWorker(BaseWorker):
         ) and torch.distributed.get_world_size() > 1:
             torch.distributed.barrier()
         super().setup_engine()
-        print(f"RayGPUWorker {mpi_rank()} setup_engine done")
 
     def _get_comm_ranks_device_id(self):
         # Make sure C++ executor would use same devices/ranks as py_executor
@@ -240,8 +239,7 @@ class RayGPUWorker(BaseWorker):
         return self._enqueue_request(request, result_wait_queue)
 
     def submit(self, request: GenerationRequest):
-        print(
-            f"[RPC] RayGPUWorker {mpi_rank()} submitting request {request.id}")
+        print(f"RayGPUWorker {self.rank} submitted request {request.id}")
         return super().submit(request)
 
     async def fetch_responses_async(self,

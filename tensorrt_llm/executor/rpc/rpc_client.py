@@ -111,9 +111,12 @@ class RPCClient:
         if self._server_stopped:
             return
 
+        # Explicit print to help trace shutdown ordering in mixed async contexts
+        print(f"[RPCClient] shutdown_server: initiating server shutdown (address={self._address})")
         self._rpc_shutdown().remote()
 
         self._server_stopped = True
+        print(f"[RPCClient] shutdown_server: server_stop flag set")
 
     def close(self):
         """Gracefully close the client, cleaning up background tasks."""
@@ -124,10 +127,12 @@ class RPCClient:
         self._closed = True
 
         logger_debug("RPC Client closing")
+        print(f"[RPCClient] close: begin (address={self._address})")
 
         if self._stop_event and self._loop:
             # Use call_soon_threadsafe since set() is not a coroutine
             self._loop.call_soon_threadsafe(self._stop_event.set)
+            print("[RPCClient] close: stop_event signaled")
 
         if self._reader_task:
             try:
@@ -140,20 +145,25 @@ class RPCClient:
                 # Task might have already finished or been cancelled
                 logger_debug(f"Reader task cleanup: {e}")
             self._reader_task = None
+            print("[RPCClient] close: reader task cleaned up")
 
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._loop_thread:
             self._loop_thread.join()
             self._loop_thread = None
+            print("[RPCClient] close: event loop thread joined")
         if self._executor:
             self._executor.shutdown(wait=True)
+            print("[RPCClient] close: executor shutdown")
 
         if self._client_socket:
             self._client_socket.close()
             self._client_socket = None
+            print("[RPCClient] close: client socket closed")
 
         logger_debug("RPC Client closed")
+        print("[RPCClient] close: end")
 
     async def _response_reader(self):
         """Task to read responses from the socket and set results on futures."""
@@ -163,13 +173,19 @@ class RPCClient:
             try:
                 # Use wait_for with a short timeout to periodically check stop event
                 try:
+                    print(f"[RPCClient] Response reader: About to call get_async()")
                     response: RPCResponse = await asyncio.wait_for(
                         self._client_socket.get_async(),
                         timeout=0.1  # Check stop event every 100ms
                     )
+                    print(f"[RPCClient] Response reader: Got response after get_async(), request_id={response.request_id if hasattr(response, 'request_id') else 'unknown'}, streaming={response.is_streaming if hasattr(response, 'is_streaming') else 'unknown'}, stream_status={response.stream_status if hasattr(response, 'stream_status') else 'N/A'}")
                 except asyncio.TimeoutError:
                     # Timeout is expected - just check stop event and continue
+                    print(f"[RPCClient] Response reader: Timeout waiting for response (this is normal)")
                     continue
+                except Exception as e:
+                    print(f"[RPCClient] Response reader: Exception in get_async(): {type(e).__name__}: {e}")
+                    raise
 
                 logger_debug(f"RPC Client received response: {response}")
                 logger_debug(
