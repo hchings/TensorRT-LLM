@@ -96,7 +96,14 @@ class RPCServer:
                                           socket_type=zmq.ROUTER)
         logger.info(f"RPC Server bound to {self._address}")
 
-    def shutdown(self, is_remote_call: bool = False):
+    def shutdown(self):
+        try:
+            self.shutdown_impl()
+        except Exception as e:
+            print(f"Error shutting down RPCServer: {e}")
+            raise e
+
+    def shutdown_impl(self, is_remote_call: bool = False):
         """Internal method to trigger server shutdown.
 
         Args:

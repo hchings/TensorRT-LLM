@@ -4,12 +4,12 @@ import os
 from pathlib import Path
 from queue import Queue
 from threading import Event
-from typing import Any, Optional, Type, Union
+from typing import Any, AsyncGenerator, Optional, Type, Union
 
 import ray
 import torch
 
-from .._utils import mpi_rank, ray_use_rpc
+from .._utils import nvtx_range_debug, ray_use_rpc
 from ..bindings import executor as tllm
 from ..builder import Engine
 from ..llmapi.llm_args import BaseLlmArgs
@@ -236,53 +236,59 @@ class RayGPUWorker(BaseWorker):
                         request: GenerationRequest,
                         result_wait_queue: Queue | None = None) -> int:
         # TODO. remove this. originally we didn't have to handle all the req id dict
+        # raise ValueError("enqueue_request should not be called.")
         return self._enqueue_request(request, result_wait_queue)
 
     def submit(self, request: GenerationRequest):
-        print(f"RayGPUWorker {self.rank} submitted request {request.id}")
         return super().submit(request)
+
+    def fetch_responses(self, timeout: Optional[float] = None) -> list:
+        # TODO copied from RpcWorker, need refactoring.
+        logger_debug(f"RayGPUWorker {self.rank} is fetching responses",
+                     color="yellow")
+        with nvtx_range_debug("RayGPUWorker.fetch_responses",
+                              color="orange",
+                              category="Worker"):
+            # NOTE: This is a blocking call, it will wait for the responses to be available.
+            responses = super().await_responses(timeout)
+            self._await_response_helper.responses_handler(responses)
+
+        qsize = self._response_queue.qsize()
+        logger_debug(f"RayGPUWorker returning {qsize} responses", color="yellow")
+
+        all_responses = []
+        for _ in range(qsize):
+            # The queue contains batches of responses, so extend the list
+            all_responses.extend(self._response_queue.get())
+        return all_responses
 
     async def fetch_responses_async(self,
                                     timeout: Optional[float] = None) -> list:
         # TODO copied from RpcWorker, need refactoring.
-        logger_debug(f"RayGPUWorker {mpi_rank()} is fetching responses async",
+        # A really async version of fetch_responses
+        logger_debug(f"RayGPUWorker {self.rank} is fetching responses async",
                      color="yellow")
 
-        responses = await asyncio.to_thread(self.await_responses,
+        # First, await any pending responses without blocking the event loop
+        responses = await asyncio.to_thread(self.fetch_responses,
                                             timeout=timeout)
-        if self._await_response_helper:
-            self._await_response_helper.responses_handler(responses)
-
-        if hasattr(self,
-                   '_response_queue') and self._response_queue is not None:
-            qsize = self._response_queue.qsize()
-            logger_debug(f"RayGPUWorker returning {qsize} responses",
-                         color="yellow")
-
-            all_responses = []
-            for _ in range(qsize):
-                all_responses.extend(self._response_queue.get())
-            return all_responses
-
-        return responses if responses else []
+        return responses
 
     # for streaming performance
-    async def fetch_responses_loop_async(self):
+    async def fetch_responses_loop_async(self) -> AsyncGenerator[list, None]:
         # TODO copied from RpcWorker, need refactoring.
-        shutdown_event = getattr(self, 'shutdown_event', Event())
-
-        while not shutdown_event.is_set():
+        while not self.shutdown_event.is_set():
             responses = await self.fetch_responses_async()
-            if responses:
+            if responses:  # Only yield if there are actual responses
                 logger_debug(
-                    f"RayGPUWorker {mpi_rank()} yielding responses: {responses}",
+                    f"RayGPUWorker {self.rank} is yielding responses: {responses}",
                     color="yellow")
-                yield responses
+                yield responses  # batching the responses to opt IPC performance
             else:
+                # Small delay to prevent busy waiting when no responses
                 await asyncio.sleep(0)
-
         logger_debug(
-            f"RayGPUWorker {mpi_rank()} quitting fetch_responses_loop_async",
+            f"RayGPUWorker {self.rank} quitting fetch_responses_loop_async",
             color="yellow")
 
     def shutdown(self):

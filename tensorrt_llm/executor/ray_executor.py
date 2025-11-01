@@ -89,7 +89,7 @@ class RayExecutor(GenerationExecutor):
             if self.use_rpc:
                 self.rpc_addr = get_unique_ipc_addr()
                 self.rpc_client = RPCClient(self.rpc_addr)
-                print(f"RPC client created at {self.rpc_addr}")
+                # print(f"RPC client created at {self.rpc_addr}")
 
                 self._results = {}
                 self._shutdown_event = threading.Event()
@@ -144,6 +144,13 @@ class RayExecutor(GenerationExecutor):
     async def _generic_fetch_loop_async(self, fetch_method_name: str,
                                         handler_method, method_name: str):
         # TODO copied from GenerationExecutorRpcProxy, need refactoring.
+        """Generic method for fetching data in a loop from RPC worker.
+
+        Args:
+            fetch_method_name: Name of the RPC client method to call
+            handler_method: The handler method to call with the fetched data
+            method_name: Name of the method for logging
+        """
         try:
             fetch_method = getattr(self.rpc_client, fetch_method_name)
             async for data in fetch_method().remote_streaming():
@@ -169,6 +176,7 @@ class RayExecutor(GenerationExecutor):
             await self._fetch_responses_loop_async()
 
         def _run_main_loop_task():
+            """Local method to run the main loop task."""
             self.main_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.main_loop)
 
@@ -177,17 +185,20 @@ class RayExecutor(GenerationExecutor):
             try:
                 self.main_loop.run_until_complete(self.main_loop_task_obj)
             except asyncio.CancelledError:
-                pass
+                pass  # Task cancellation is expected during shutdown
             finally:
                 self.main_loop.close()
 
         self.main_loop_thread = threading.Thread(target=_run_main_loop_task,
-                                                 daemon=True)
+                                                 daemon=True,
+                                                 name="ray_executor_main_loop")
         self.main_loop_thread.start()
         atexit.register(self.shutdown)
 
     def setup_engine_remote(self):
         return self.collective_rpc("setup_engine", non_block=False)
+
+    # TODO: use Ray RPC to shutdown RPC server, and then close client. 
 
     def handle_responses(self, responses: list[GenerationResult]) -> bool:
         # TODO copied from GenerationExecutorRpcProxy, need refactoring.
@@ -209,6 +220,7 @@ class RayExecutor(GenerationExecutor):
                 if isinstance(queue, _SyncQueue):
                     queue.put_nowait(r)
                     async_queues.append(queue)
+                    # all the loops are identical
                     event_loop = event_loop or queue.loop
                 else:
                     queue.put(r)
@@ -217,7 +229,9 @@ class RayExecutor(GenerationExecutor):
                         r, ErrorResponse):
                     self._results.pop(client_id)
 
+        # Handle the case where responses might not be a list of lists
         if responses and not isinstance(responses[0], list):
+            # If responses is a flat list, wrap it
             responses = [responses]
 
         for res in responses:
@@ -314,10 +328,9 @@ class RayExecutor(GenerationExecutor):
         if self.use_rpc:
             with nvtx_range_debug("rpc_submit"):
                 self.rpc_client.submit(request).remote(need_response=False)
-                print(
-                    f"[RPC] RayExecutor  submit done for request {request.id}")
+                # print(
+                #     f"[RPC] RayExecutor  submit done for request {request.id}")
 
-            # TODO. use the future return by BaseWorker submit
             result = GenerationResult(
                 request,
                 background_error_handler=self._handle_background_error,
@@ -355,6 +368,13 @@ class RayExecutor(GenerationExecutor):
                                   request_id=request_id)
 
     def shutdown(self):
+        try:
+            self.shutdown_impl()
+        except Exception as e:
+            print(f"Error shutting down RayExecutor: {e}")
+            raise e
+
+    def shutdown_impl(self):
         if self.use_rpc:
             if self._shutdown_event.is_set():
                 return

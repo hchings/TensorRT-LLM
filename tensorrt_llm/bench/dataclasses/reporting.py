@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import defaultdict
 from typing import Any, Dict, List, NamedTuple
 
@@ -507,9 +508,12 @@ class ReportUtility:
                 f"Max Sequence Length:\t{build_cfg['max_seq_len']}\n"
                 f"\n")
         else:
+            # Check MPI vs RAY and RPC status
+            comm_backend = "RAY" if os.environ.get("TLLM_DISABLE_MPI") == "1" else "MPI"
+            ray_status = "[RPC]" if os.environ.get("TLLM_RAY_USE_RPC") == "1" else "[original]"
             backend_info = (
                 "\n\n===========================================================\n"
-                "= PYTORCH BACKEND\n"
+                f"= PYTORCH BACKEND [{comm_backend}] {ray_status}\n"
                 "===========================================================\n"
                 f"Model:\t\t\t{engine['model']}\n"
                 f"Model Path:\t\t{engine['model_path']}\n"
