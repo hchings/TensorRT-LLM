@@ -759,9 +759,12 @@ class TorchSampler(Sampler):
                 if request.py_return_generation_logits:
                     generation_logits_storage = request.py_result._generation_logits
                     if generation_logits_storage and generation_logits_storage._storage is not None:
-                        # Compute log_softmax to get logprobs for the sampled token
-                        # Iinternal storage tensor: [seq_length, beam_width, vocab_size]
-                        logits_for_step = generation_logits_storage._storage[step]  # [beam_width, vocab_size]
+                        # Internal storage tensor: [seq_length, beam_width, vocab_size]
+                        # Calculate absolute step index in the generation sequence
+                        num_generated_tokens = len(request.get_tokens(beam)) - request.py_prompt_len
+                        absolute_step = num_generated_tokens - count + step
+
+                        logits_for_step = generation_logits_storage._storage[absolute_step]  # [beam_width, vocab_size]
                         logprobs_for_step = F.log_softmax(logits_for_step[beam].float(), dim=-1)
                         sampled_logprob = logprobs_for_step[sampled_token].item()
 
