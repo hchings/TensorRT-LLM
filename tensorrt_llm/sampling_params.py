@@ -172,7 +172,8 @@ class SamplingParams:
         min_p (float, optional): scale the most likely token to determine the minimum token probability. None means using C++ runtime default 0.0. Defaults to None.
         beam_width_array (List[int], optional): The array of beam width using in Variable-Beam-Width-Search. Defaults to None.
 
-        logprobs (int, optional): Number of log probabilities to return per output token. Defaults to None.
+        logprobs (int, optional): Number of log probabilities to return per output token. When set to 0, return only the sampled token's log probability.
+                                  When set to K>0, return the sampled token's log probability (first) + top-K log probabilities. Defaults to None.
         prompt_logprobs (int, optional): Number of log probabilities to return per prompt token. Defaults to None.
         return_context_logits (bool): Controls if Result should contain the context logits. Defaults to False.
         return_generation_logits (bool): Controls if Result should contain the generation logits. Defaults to False.

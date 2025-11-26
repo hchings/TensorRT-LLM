@@ -237,3 +237,58 @@ def test_generate_async_with_return_logits(
                 assert len(sequence.logprobs) == idx + 1
             else:
                 assert len(sequence.logprobs) == 0
+
+
+@pytest.mark.parametrize("logprobs_k", [0, 1, 3], ids=["top_0", "top_1", "top_3"])
+def test_sampled_token_always_in_logprobs(logprobs_k: int):
+    """Test two scenarios:
+        - logprobs=0: Returns only sampled token (1 element)
+        - logprobs=K (K>0): Returns sampled token as first element + top-K tokens (up to K+1 elements)
+    """
+    llm = LLM(
+        model=os.path.join(llm_models_root(), "llama-models-v2",
+                           "TinyLlama-1.1B-Chat-v1.0"),
+        kv_cache_config=global_kvcache_config,
+    )
+
+    sampling_params = SamplingParams(
+        max_tokens=8,
+        logprobs=logprobs_k,
+    )
+
+    with llm:
+        for output in llm.generate(prompts, sampling_params=sampling_params):
+            for sequence in output.outputs:
+                assert len(sequence.logprobs) == sampling_params.max_tokens, \
+                    f"Expected {sampling_params.max_tokens} logprob entries, got {len(sequence.logprobs)}"
+
+                for token_idx, (sampled_token_id, token_logprobs) in enumerate(
+                    zip(sequence.token_ids, sequence.logprobs)
+                ):
+                    assert sampled_token_id in token_logprobs, \
+                        f"Token {token_idx}: Sampled token ID {sampled_token_id} not in logprobs dict: {token_logprobs.keys()}"
+
+                    if logprobs_k == 0:
+                        assert len(token_logprobs) == 1, \
+                            f"Token {token_idx}: Expected 1 logprob (sampled only), got {len(token_logprobs)}"
+                    else:
+                        assert len(token_logprobs) <= logprobs_k + 1, \
+                            f"Token {token_idx}: Expected at most {logprobs_k + 1} logprobs, got {len(token_logprobs)}"
+                        assert len(token_logprobs) >= 1
+
+                    # Verify rank correctness: rank should match position in sorted logprobs
+                    sorted_tokens_by_prob = sorted(
+                        token_logprobs.items(),
+                        key=lambda x: x[1].logprob,
+                        reverse=True  # Highest logprob first (rank 1 = highest)
+                    )
+                    
+                    for rank_idx, (token_id, logprob_obj) in enumerate(sorted_tokens_by_prob, start=1):
+                        assert logprob_obj.rank == rank_idx, \
+                            f"Token {token_idx}: Token {token_id} rank mismatch. " \
+                            f"Expected rank {rank_idx} (by logprob value), got {logprob_obj.rank}"
+
+
+# def test_logprobs_match_hf():
+
+

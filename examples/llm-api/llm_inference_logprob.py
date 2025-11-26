@@ -21,13 +21,16 @@ def main():
         "The future of AI is",
     ]
 
-    # Currently With logprobs=1, PyTorch backend now returns the sampled token's logprob
-    # TODO: should change to Top-K + sampled to match TensorRT behavior.
+    # logprobs behavior (follows vLLM/OpenAI API):
+    # - logprobs=None: No log probabilities returned
+    # - logprobs=0: Returns only the sampled token's logprob (1 element)
+    # - logprobs=K (K>0): Returns sampled token (first) + top-K tokens (up to K+1 elements)
+    # - logprobs=-1: Returns sampled token + all vocab_size tokens
     sampling_params = SamplingParams(
         max_tokens=10,
         # temperature=0.7,
         # top_p=0.95,
-        logprobs=1,
+        logprobs=0,  # Set to 0 for sampled only, or K>0 for sampled + top-K
     )
 
     for output in llm.generate(prompts, sampling_params):
@@ -51,8 +54,14 @@ def main():
             ):
                 print(f"\n  Token {i}: ID={token_id}, Text={llm.tokenizer.decode([token_id])!r}")
 
-                # TODO. move to proper test
-                # assert len(token_logprobs) == 1
+                # Verify vLLM/OpenAI API behavior:
+                # - logprobs=0: should have only 1 entry (sampled token)
+                # - logprobs=K (K>0): should have up to K+1 entries (sampled + top-K, with dedup)
+                if sampling_params.logprobs == 0:
+                    assert len(token_logprobs) == 1, f"Expected 1 logprob for sampled token, got {len(token_logprobs)}"
+                elif sampling_params.logprobs is not None and sampling_params.logprobs > 0:
+                    assert len(token_logprobs) <= sampling_params.logprobs + 1, \
+                        f"Expected at most {sampling_params.logprobs + 1} logprobs, got {len(token_logprobs)}"
                 assert token_id in token_logprobs, f"Sampled token {token_id} not in logprobs dict."
 
                 for tid, logprob_obj in token_logprobs.items():
