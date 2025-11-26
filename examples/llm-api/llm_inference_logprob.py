@@ -7,13 +7,11 @@ from tensorrt_llm._tensorrt_engine import LLM as TrtLLM
 def main():
     llm = LLM(
         model="/scratch/llm-models/llama-models-v2/TinyLlama-1.1B-Chat-v1.0",
-        gather_generation_logits=True,  # Required. TODO: Acutal API TBD.
         orchestrator_type="ray"
     )
 
     # llm = TrtLLM(
     #     model="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-    #     gather_generation_logits=True
     # )
 
     # Sample prompts.
@@ -23,15 +21,13 @@ def main():
         "The future of AI is",
     ]
 
-    # Current behavior:
-    # - With return_generation_logits=True: Returns ONLY the sampled token's logprob
-    # - Without return_generation_logits=True: Returns top-K tokens (sampled token NOT guaranteed)
+    # Currently With logprobs=1, PyTorch backend now returns the sampled token's logprob
+    # TODO: should change to Top-K + sampled to match TensorRT behavior.
     sampling_params = SamplingParams(
         max_tokens=10,
         # temperature=0.7,
         # top_p=0.95,
         logprobs=1,
-        return_generation_logits=True,
     )
 
     for output in llm.generate(prompts, sampling_params):
