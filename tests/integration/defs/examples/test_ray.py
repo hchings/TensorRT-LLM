@@ -6,12 +6,6 @@ from defs.common import venv_check_call, wait_for_server
 from defs.conftest import get_device_count, llm_models_root
 
 
-@pytest.fixture(scope="module")
-def ray_example_root(llm_root):
-    example_root = os.path.join(llm_root, "examples", "ray_orchestrator")
-    return example_root
-
-
 def test_llm_inference_async_ray(ray_example_root, llm_venv):
     script_path = os.path.join(ray_example_root, "llm_inference_async_ray.py")
     model_path = f"{llm_models_root()}/llama-models-v2/TinyLlama-1.1B-Chat-v1.0"
