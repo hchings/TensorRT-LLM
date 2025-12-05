@@ -2727,3 +2727,9 @@ def ray_cleanup(llm_venv) -> None:
             "ray.scripts.scripts",
             "stop",
         ])
+
+
+@pytest.fixture(scope="module")
+def ray_example_root(llm_root):
+    example_root = os.path.join(llm_root, "examples", "ray_orchestrator")
+    return example_root
