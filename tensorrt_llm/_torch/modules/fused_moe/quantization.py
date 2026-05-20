@@ -619,9 +619,19 @@ class FusedMoEMethodBase(ABC):
                                 non_blocking=True)
 
     def pre_reload_weights(self, module: torch.nn.Module):
-        for param_name, metadata in module.rebuild_tensor_metadata.items():
-            # Extract meta tensor from metadata dict
+        # c3cdc9321 stores a strong ref to the registered (resmoothed/padded)
+        # buffer in metadata['param']. Allocating a fresh buffer here while
+        # that ref is still live doubles FP8 weight memory during the spike
+        # (+53 GiB on Qwen3-235B FP8 rollout TP=4/EP=4). Free both refs to
+        # the old buffer first so the caching allocator can reuse it, and
+        # drop the metadata entry so the next replace_parameter_and_save_metadata
+        # call re-enters its "first time" branch (keeps shape correct when
+        # the saved buffer was padded/transformed vs the original).
+        for param_name in list(module.rebuild_tensor_metadata.keys()):
+            metadata = module.rebuild_tensor_metadata[param_name]
             meta_tensor = metadata['meta']
+            del module.rebuild_tensor_metadata[param_name]
+            module.register_parameter(param_name, None)
             param = torch.nn.Parameter(torch.empty_like(meta_tensor,
                                                         device="cuda"),
                                        requires_grad=False)
