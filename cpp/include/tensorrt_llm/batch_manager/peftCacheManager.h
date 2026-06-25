@@ -131,6 +131,17 @@ public:
 
     [[nodiscard]] SizeType32 getMaxDevicePages() const override;
 
+    // ===== Plan B: in-place adapter refit (signatures + shells; impl TODO) =====
+    /// [Plan B / R1] Pin a task in the device cache so it is never LRU-evicted across RL steps.
+    void pinTask(uint64_t taskId);
+    /// [Plan B / R1] Unpin a previously pinned task.
+    void unpinTask(uint64_t taskId);
+    /// [Plan B / R2,R3,R6] Overwrite a resident task's adapter weights in place (device cache),
+    /// keeping the same taskId and device pointers; also updates/invalidates the host copy (R6).
+    void updateTaskPeft(uint64_t taskId, runtime::ITensor::SharedPtr weights, runtime::ITensor::SharedPtr config);
+    /// [Plan B / debug] Resident device TaskLayerModuleConfig list (pointers/ranks) for taskId.
+    [[nodiscard]] std::vector<runtime::LoraCache::TaskLayerModuleConfig> const& getTaskPeft(uint64_t taskId) const;
+
     [[nodiscard]] SizeType32 getMaxHostPages() const override;
 
     [[nodiscard]] SizeType32 determineNumPages(std::shared_ptr<LlmRequest> llmRequest) const override;

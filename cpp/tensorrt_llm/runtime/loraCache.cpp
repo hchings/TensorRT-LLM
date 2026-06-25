@@ -403,6 +403,29 @@ std::vector<LoraCache::TaskLayerModuleConfig> const& LoraCache::get(TaskIdType t
     return *mCacheMap.at(taskId)->configs;
 }
 
+// ===== Plan B: in-place adapter refit (shells; impl TODO) =====
+void LoraCache::pinTask(TaskIdType taskId)
+{
+    // TODO(plan-b/R1): mark TaskValue pinned; claimPagesWithEvict must skip pinned tasks and
+    // markTaskDone must not make a pinned task evictable.
+    TLLM_THROW("LoraCache::pinTask not implemented (Plan B shell)");
+}
+
+void LoraCache::unpinTask(TaskIdType taskId)
+{
+    // TODO(plan-b/R1): clear the pinned flag for taskId.
+    TLLM_THROW("LoraCache::unpinTask not implemented (Plan B shell)");
+}
+
+void LoraCache::updateWeights(TaskIdType taskId, TensorPtr weights, TensorPtr config)
+{
+    // TODO(plan-b/R2,R3): require isLoaded(taskId); validate config rank/shape == loaded task (R3);
+    // reuse copyToPages(weights, config, ..., existingPages, existingPageIds) on the task's CURRENT
+    // pageIds (no claimPages / no eviction) so device pointers stay stable. R6 host coherence is
+    // handled by the caller in PeftCacheManager::updateTaskPeft.
+    TLLM_THROW("LoraCache::updateWeights not implemented (Plan B shell)");
+}
+
 void LoraCache::bump(TaskIdType taskId)
 {
     std::lock_guard<std::mutex> lk(mCacheMutex);

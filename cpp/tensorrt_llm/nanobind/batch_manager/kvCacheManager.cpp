@@ -718,6 +718,15 @@ void tb::BasePeftCacheManagerBindings::initBindings(nb::module_& m)
             nb::call_guard<nb::gil_scoped_release>()) // ;
         .def("ensure_batch_map_task_id", &tb::PeftCacheManager::ensureBatchMapTaskId, nb::arg("context_requests"),
             nb::arg("generation_requests"), nb::arg("reset_gpu_cache") = false,
+            nb::call_guard<nb::gil_scoped_release>())
+        // ===== Plan B: in-place adapter refit (bindings for shells; impl TODO) =====
+        .def("pin_task", &tb::PeftCacheManager::pinTask, nb::arg("task_id"),
+            nb::call_guard<nb::gil_scoped_release>())
+        .def("unpin_task", &tb::PeftCacheManager::unpinTask, nb::arg("task_id"),
+            nb::call_guard<nb::gil_scoped_release>())
+        .def("update_task_peft", &tb::PeftCacheManager::updateTaskPeft, nb::arg("task_id"), nb::arg("weights"),
+            nb::arg("config"), nb::call_guard<nb::gil_scoped_release>())
+        .def("get_task_peft", &tb::PeftCacheManager::getTaskPeft, nb::arg("task_id"),
             nb::call_guard<nb::gil_scoped_release>());
 
     nb::class_<tb::NoOpPeftCacheManager, tb::BasePeftCacheManager>(m, "NoOpPeftCacheManager")

@@ -171,6 +171,44 @@ class WorkerExtension:
             weights_updated = weights_updated and torch.allclose(p, torch.zeros_like(p))
         return weights_updated
 
+    # ===== Plan B: in-place multi-LoRA adapter refit (signatures + shells; impl TODO) =====
+    def _peft_cache_manager(self):
+        """Resolve the PeftCacheManager on this worker."""
+        # from tensorrt_llm._torch.pyexecutor.resource_manager import ResourceManagerType
+        # return self.engine.resource_manager.resource_managers[
+        #     ResourceManagerType.PEFT_CACHE_MANAGER]
+        raise NotImplementedError("Plan B: _peft_cache_manager not implemented")
+
+    def pin_lora_task(self, task_id: int) -> None:
+        """[Plan B / R1] Pin adapter `task_id` resident on this worker before the refit loop."""
+        # self._peft_cache_manager().pin_task(task_id)
+        raise NotImplementedError("Plan B: pin_lora_task not implemented")
+
+    @control_action_decorator
+    def update_lora_weights(self,
+                            ipc_handles: Optional[dict] = None,
+                            task_id: int = None) -> None:
+        """[Plan B / R2,R4,R7] In-place device->device adapter refit. Two-phase, mirrors update_weights:
+              update_lora_weights(ipc_handles, task_id)  # push (may be chunked / called repeatedly)
+              update_lora_weights(None,        task_id)  # finalize (run once)
+
+        Push branch (ipc_handles is not None): reconstruct THIS rank's adapter A/B shard from the CUDA
+        IPC handles (reuse the update_weights reconstruction above), pack into the stacked
+        (weights, config) layout, then self._peft_cache_manager().update_task_peft(task_id, w, c).
+
+        Finalize branch (ipc_handles is None): torch.cuda.synchronize(); refresh slot ptr tables if
+        needed (R5; trivial for same pointer); reset_prefix_cache() for the adapter (stale KV);
+        ipc_collect / empty_cache. R7 reshard (trainer EP/TP -> inference shard) is done sender-side.
+        """
+        raise NotImplementedError("Plan B: update_lora_weights not implemented")
+
+    def get_lora_task_pointers(self, task_id: int):
+        """[Plan B / debug, NOT hot-path] Return [(in_ptr, out_ptr), ...] for the resident adapter so
+        a test can assert pointer stability across a refit."""
+        # cfgs = self._peft_cache_manager().get_task_peft(task_id)
+        # return [(c.weights_in_pointer, c.weights_out_pointer) for c in cfgs]
+        raise NotImplementedError("Plan B: get_lora_task_pointers not implemented")
+
     def start_profile(self):
         torch.cuda.profiler.start()
 

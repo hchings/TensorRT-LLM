@@ -258,6 +258,31 @@ public:
      */
     void markAllDone();
 
+    // ===== Plan B: in-place adapter refit (signatures + shells; impl TODO) =====
+    /**
+     * \brief [Plan B / R1] Pin a task so it is never selected for LRU eviction; keeps its pages
+     * (and thus its weight pointers) resident across steps so updateWeights has a stable target.
+     */
+    void pinTask(TaskIdType taskId);
+
+    /**
+     * \brief [Plan B / R1] Unpin a previously pinned task, allowing normal LRU eviction again.
+     */
+    void unpinTask(TaskIdType taskId);
+
+    /**
+     * \brief [Plan B / R2,R3] Overwrite a resident task's weights IN PLACE.
+     *
+     * Reuses the task's EXISTING pages (no claimPages / no eviction) so weightsInPointer /
+     * weightsOutPointer stay identical => CUDA-graph replay needs no recapture. The task must be
+     * loaded, and \p config's rank/shape must match the loaded task (rank change is rejected).
+     *
+     * \param[in] taskId: resident task to update
+     * \param[in] weights: new LoRA weights (same stacked layout as put/loadWeights)
+     * \param[in] config: lora config; rank/module set must match the loaded task
+     */
+    void updateWeights(TaskIdType taskId, TensorPtr weights, TensorPtr config);
+
     /**
      * \param[in] taskId: the taskid
      * \returns -- number of pages needed to store the given task

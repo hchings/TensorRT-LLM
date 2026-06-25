@@ -2431,3 +2431,34 @@ class PeftCacheManager(BaseResourceManager):
 
     def is_task_cached_device(self, task_id: int) -> bool:
         return self.impl.is_task_cached_device(task_id)
+
+    # ===== Plan B: in-place adapter refit (signatures + shells; impl TODO) =====
+    def pin_task(self, task_id: int) -> None:
+        """[Plan B / R1] Keep adapter `task_id` resident (exclude from LRU eviction)."""
+        # return self.impl.pin_task(task_id)
+        raise NotImplementedError("Plan B: pin_task not implemented")
+
+    def unpin_task(self, task_id: int) -> None:
+        """[Plan B / R1] Allow `task_id` to be evicted again."""
+        # return self.impl.unpin_task(task_id)
+        raise NotImplementedError("Plan B: unpin_task not implemented")
+
+    def update_task_peft(self, task_id: int, weights, config) -> None:
+        """[Plan B / R2,R3,R6] Overwrite a resident adapter's weights in place (same task_id).
+
+        Write-through (write-back design): the C++ side updates BOTH the device cache (in-place, stable
+        pointers) AND the host cache from the same source tensor, so a later host->device reload serves
+        the fresh weights. (Re-push design alternative: device-only + drop-on-evict; see design doc §17.)
+
+        weights/config use the same stacked layout as add_request_peft (per-expert [E,...] for MoE);
+        apply the same unsqueeze(0) prep before handing to the C++ binding.
+        """
+        # if weights is not None: weights = weights.unsqueeze(0)
+        # if config is not None: config = config.unsqueeze(0)
+        # return self.impl.update_task_peft(task_id, weights, config)
+        raise NotImplementedError("Plan B: update_task_peft not implemented")
+
+    def get_task_peft(self, task_id: int):
+        """[Plan B / debug] Resident device TaskLayerModuleConfig list (pointers/ranks) for task_id."""
+        # return self.impl.get_task_peft(task_id)
+        raise NotImplementedError("Plan B: get_task_peft not implemented")

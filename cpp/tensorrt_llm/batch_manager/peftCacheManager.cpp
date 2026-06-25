@@ -580,6 +580,39 @@ void PeftCacheManager::resetDeviceCache()
     TLLM_LOG_DEBUG("%s stop", __PRETTY_FUNCTION__);
 }
 
+// ===== Plan B: in-place adapter refit (shells; impl TODO) =====
+void PeftCacheManager::pinTask(uint64_t taskId)
+{
+    // TODO(plan-b/R1): mDeviceLoraCache->pinTask(taskId); (optionally mHostLoraCache->pinTask too)
+    TLLM_THROW("PeftCacheManager::pinTask not implemented (Plan B shell)");
+}
+
+void PeftCacheManager::unpinTask(uint64_t taskId)
+{
+    // TODO(plan-b/R1): mDeviceLoraCache->unpinTask(taskId);
+    TLLM_THROW("PeftCacheManager::unpinTask not implemented (Plan B shell)");
+}
+
+void PeftCacheManager::updateTaskPeft(uint64_t taskId, runtime::ITensor::SharedPtr weights, runtime::ITensor::SharedPtr config)
+{
+    // Write-through (write-back design): update BOTH tiers in place from the trainer's source tensor so
+    // that a later host->device reload (copyTask, host->device only) serves the fresh weights.
+    // TODO(plan-b/R2): if (mDeviceLoraCache->isLoaded(taskId)) mDeviceLoraCache->updateWeights(taskId, weights, config);
+    //                  // in-place; device pointers stay stable (no claim/evict) => no CUDA-graph recapture.
+    // TODO(plan-b/R6 write-through): if (mHostLoraCache->isLoaded(taskId)) mHostLoraCache->updateWeights(taskId, weights, config);
+    //                  // keeps tier-2 fresh so reload-from-host is correct. Requires host cache >= active set
+    //                  // (else host eviction -> reload from stale _cpp/disk). No device->host copy needed --
+    //                  // both caches get copyToPages'd from the same source tensor.
+    // ALT (re-push design, §17): skip the host write; drop-on-evict and let the trainer re-push on swap-in.
+    TLLM_THROW("PeftCacheManager::updateTaskPeft not implemented (Plan B shell)");
+}
+
+std::vector<runtime::LoraCache::TaskLayerModuleConfig> const& PeftCacheManager::getTaskPeft(uint64_t taskId) const
+{
+    // TODO(plan-b/debug): return mDeviceLoraCache->get(taskId);  // existing device-cache configs
+    TLLM_THROW("PeftCacheManager::getTaskPeft not implemented (Plan B shell)");
+}
+
 void PeftCacheManager::markRequestDone(LlmRequest const& llmReq, bool pause)
 {
     TLLM_LOG_DEBUG("%s start", __PRETTY_FUNCTION__);
