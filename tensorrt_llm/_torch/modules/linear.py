@@ -463,9 +463,16 @@ class LinearMethodBase(ABC):
         """
         Pre-reload weights for the linear layer.
         """
-        for param_name, metadata in module.rebuild_tensor_metadata.items():
-            # Extract meta tensor from metadata dict
+        # See companion fix in fused_moe/quantization.py:pre_reload_weights —
+        # drop the strong ref to the old (resmoothed/padded) buffer in
+        # metadata['param'] BEFORE allocating the fresh original-shape buffer,
+        # otherwise both buffers stay GPU-resident across reload and double
+        # the per-rank FP8 weight footprint.
+        for param_name in list(module.rebuild_tensor_metadata.keys()):
+            metadata = module.rebuild_tensor_metadata[param_name]
             meta_tensor = metadata['meta']
+            del module.rebuild_tensor_metadata[param_name]
+            module.register_parameter(param_name, None)
             param = Parameter(torch.empty_like(meta_tensor, device="cuda"),
                               requires_grad=False)
             module.register_parameter(param_name, param)
