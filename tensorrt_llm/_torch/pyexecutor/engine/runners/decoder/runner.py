@@ -3141,10 +3141,11 @@ class DecoderRunner(ScheduledModelRunner):
         """Check whether the cached steady-state generation prepare applies.
 
         The cache is only recorded by a full _prepare_tp_inputs pass whose
-        batch consisted purely of non-dummy generation requests that all had
-        a previous overlap-scheduler tensor (see the recording site), so the
-        per-step check only needs to confirm the dynamic conditions: still a
-        generation-only batch with the exact same requests in the same order.
+        batch consisted of generation requests that all had a previous
+        overlap-scheduler tensor, optionally followed by CUDA-graph padding
+        dummies (see the recording site), so the per-step check only needs
+        to confirm the dynamic conditions: still a generation-only batch
+        with the exact same requests (dummies included) in the same order.
         """
         cache = self._steady_gen_cache
         if cache is None or is_dummy:
@@ -3172,71 +3173,101 @@ class DecoderRunner(ScheduledModelRunner):
     ):
         """Prepare inputs for an unchanged generation-only batch.
 
-        Every request advanced by exactly one committed token since the last
-        prepare, so instead of re-walking the batch in Python this advances
-        the cached positions in place (device position buffer plus a pinned
-        host counter), reuses the seq-slot buffer already on device, and
-        refreshes only the per-step metadata. For mrope models (recorded only
-        for batches with no actual mrope work) the (3,1,N) broadcast buffer
-        the model reads is the one advanced.
+        Every real request advanced by exactly one committed token since the
+        last prepare, so instead of re-walking the batch in Python this
+        advances the cached positions in place (device position buffer plus a
+        pinned host counter), reuses the seq-slot buffer already on device,
+        and refreshes only the per-step metadata. CUDA-graph padding dummies
+        (the batch tail, ``[num_real:]``) keep their positions and input rows
+        untouched, exactly as the full pass leaves them. For mrope models
+        (recorded only for batches with no actual mrope work) the (3,1,N)
+        broadcast buffer the model reads is the one advanced.
+
+        When ``attn_metadata`` is the very object the recording pass
+        prepared, its state is advanced in place
+        (``prepare_steady_gen_step``): kv lengths +1, and the KV block table
+        re-staged only when a real request starts a new block this step.
+        Any other metadata object gets the full field assignment and
+        ``prepare()``.
         """
         cache = self._steady_gen_cache
         num_requests = cache["num_requests"]
+        num_real = cache["num_real"]
 
         # Positions and cached-token counts are the same values in this
-        # regime; advance both by one. The device-side position buffer is
-        # advanced in place: it still holds the previous step's positions
-        # because only _prepare_tp_inputs writes it and the cache validity
-        # invariant guarantees the previous pass wrote these same rows. This
-        # avoids reusing a mutated pinned buffer as the source of an async
-        # H2D whose previous-step copy may still be pending under the overlap
-        # scheduler (the nvbug 6293536 hazard class; see
-        # KVCacheManager._stage_block_offsets_for_copy). The pinned buffer is
-        # host-side bookkeeping only.
+        # regime; advance both by one for the real requests. The device-side
+        # position buffer is advanced in place: it still holds the previous
+        # step's positions because only _prepare_tp_inputs writes it and the
+        # cache validity invariant guarantees the previous pass wrote these
+        # same rows. This avoids reusing a mutated pinned buffer as the
+        # source of an async H2D whose previous-step copy may still be
+        # pending under the overlap scheduler (the nvbug 6293536 hazard
+        # class; see KVCacheManager._stage_block_offsets_for_copy). The
+        # pinned buffer is host-side bookkeeping only.
         use_mrope = cache["use_mrope"]
         positions = self._steady_gen_positions_pinned[:num_requests]
-        positions.add_(1)
+        positions[:num_real].add_(1)
         if use_mrope:
             # Text-only batch on an mrope model: the recording pass broadcast
             # the scalar positions onto all three axes of the (3,1,N) buffer,
             # which is what the model (and any captured CUDA graph) reads, so
             # advance it in place. position_ids_cuda is reseeded by the next
             # full pass.
-            self.mrope_position_ids_cuda[:, :, :num_requests].add_(1)
+            self.mrope_position_ids_cuda[:, :, :num_real].add_(1)
         else:
-            self.position_ids_cuda[:num_requests].add_(1)
+            self.position_ids_cuda[:num_real].add_(1)
         num_cached_tokens_per_seq = positions.tolist()
 
         # Gather this step's input tokens from the previous iteration's device
         # sample buffer; the seq-slot indices in previous_batch_indices_cuda
-        # are unchanged since the last full pass.
-        previous_slots = self.previous_batch_indices_cuda[:num_requests]
+        # are unchanged since the last full pass. Dummy rows keep whatever the
+        # full pass left there (their outputs are discarded).
+        previous_slots = self.previous_batch_indices_cuda[:num_real]
         torch.index_select(
             new_tensors_device.new_tokens[0, :, : self._config.max_beam_width],
             0,
             previous_slots,
-            out=self.input_ids_cuda[: num_requests * self._config.max_beam_width].view(
-                num_requests, self._config.max_beam_width
+            out=self.input_ids_cuda[: num_real * self._config.max_beam_width].view(
+                num_real, self._config.max_beam_width
             ),
         )
 
-        if not attn_metadata.is_cuda_graph:
-            attn_metadata.seq_lens = cache["seq_lens_ones"]
-        attn_metadata.beam_width = 1
-        attn_metadata.request_ids = cache["request_ids"]
-        attn_metadata.prompt_lens = cache["prompt_lens"]
-        attn_metadata.num_contexts = 0
-        attn_metadata.num_chunked_ctx_requests = 0
-        attn_metadata.kv_cache_params = KVCacheParams(
+        kv_cache_params = KVCacheParams(
             use_cache=True,
             num_cached_tokens_per_seq=num_cached_tokens_per_seq,
             num_extra_kv_tokens=get_num_extra_kv_tokens(None),
         )
-        attn_metadata.kv_cache_manager = kv_cache_manager
-        if hasattr(self.model.model_config.pretrained_config, "chunk_size"):
-            attn_metadata.mamba_chunk_size = self.model.model_config.pretrained_config.chunk_size
-        with nvtx_range("steady_gen_metadata_prepare"):
-            attn_metadata.prepare()
+        if attn_metadata is cache["attn_metadata"]:
+            # Same object the recording pass prepared for this layout: the
+            # request ids, prompt lengths, seq lens, request types and block
+            # table are still in place; only the kv lengths move. A request
+            # whose new position is a block multiple starts a new KV block
+            # this step, so the block table must be re-staged then.
+            attn_metadata.kv_cache_params = kv_cache_params
+            tokens_per_block = cache["tokens_per_block"]
+            refresh_block_offsets = tokens_per_block is None or any(
+                pos % tokens_per_block == 0 for pos in num_cached_tokens_per_seq[:num_real]
+            )
+            with nvtx_range("steady_gen_metadata_prepare"):
+                attn_metadata.prepare_steady_gen_step(
+                    num_real, refresh_block_offsets=refresh_block_offsets
+                )
+        else:
+            if not attn_metadata.is_cuda_graph:
+                attn_metadata.seq_lens = cache["seq_lens_ones"]
+            attn_metadata.beam_width = 1
+            attn_metadata.request_ids = cache["request_ids"]
+            attn_metadata.prompt_lens = cache["prompt_lens"]
+            attn_metadata.num_contexts = 0
+            attn_metadata.num_chunked_ctx_requests = 0
+            attn_metadata.kv_cache_params = kv_cache_params
+            attn_metadata.kv_cache_manager = kv_cache_manager
+            if hasattr(self.model.model_config.pretrained_config, "chunk_size"):
+                attn_metadata.mamba_chunk_size = (
+                    self.model.model_config.pretrained_config.chunk_size
+                )
+            with nvtx_range("steady_gen_metadata_prepare"):
+                attn_metadata.prepare()
 
         attn_all_rank_num_tokens = get_all_rank_num_tokens(
             attn_metadata,
@@ -3441,6 +3472,15 @@ class DecoderRunner(ScheduledModelRunner):
                 context_prompt_lookahead.append(
                     _get_context_prompt_lookahead_token(request, end_compute)
                 )
+            # Tokens this request actually pushes through the model across
+            # its chunks; compared against prompt_len - cached_tokens it
+            # exposes prefill work that prefix reuse did not save.
+            request.py_ctx_computed_tokens = getattr(request, "py_ctx_computed_tokens", 0) + (
+                end_compute - begin_compute
+            )
+            if getattr(request, "py_ctx_num_chunks", 0) == 0:
+                request.py_ctx_first_begin = begin_compute
+            request.py_ctx_num_chunks = getattr(request, "py_ctx_num_chunks", 0) + 1
             # Fetch only the current chunk. get_tokens(0) marshals the whole
             # O(seq_len) VecTokens into a Python list of boxed ints; chunked
             # prefill re-enters this loop for every chunk of the same prompt, so
@@ -3839,6 +3879,9 @@ class DecoderRunner(ScheduledModelRunner):
 
         # Cache invariant method result to avoid repeated calls per-request
         _n_gen = len(generation_requests)
+        # CUDA-graph padding dummies in this batch (they never carry a
+        # previous overlap-scheduler tensor and append no input_ids).
+        _n_cuda_graph_dummy = 0
         # One-shot batch-level flag — True iff any generation request actually
         # carries multimodal payload. Lets the strip_mm_data branch below
         # short-circuit on a LOAD_FAST rather than a per-request LOAD_ATTR
@@ -3906,6 +3949,8 @@ class DecoderRunner(ScheduledModelRunner):
                 # (2) a dummy request; or
                 # (3) the first step in the generation server of disaggregated serving.
                 elif new_tokens_device is None or request.is_dummy or request.py_batch_idx is None:
+                    if request.is_cuda_graph_dummy:
+                        _n_cuda_graph_dummy += 1
                     # skip adding input_ids of CUDA graph dummy requests so that new_tokens_device
                     # can be aligned to the correct positions.
                     if not request.is_cuda_graph_dummy:
@@ -4529,11 +4574,16 @@ class DecoderRunner(ScheduledModelRunner):
 
         if not is_dummy:
             # Record the steady-state generation cache when this pass handled
-            # purely non-dummy generation requests that all carried a previous
-            # overlap-scheduler tensor (previous_batch_len == _n_gen implies
-            # every request took that branch and none appended input_ids).
-            # While the batch composition holds, the next passes only need to
-            # advance positions by one and refresh per-step metadata.
+            # generation requests that all carried a previous overlap-scheduler
+            # tensor, optionally followed by CUDA-graph padding dummies
+            # (previous_batch_len == _n_gen - _n_cuda_graph_dummy and
+            # num_tokens == 0 imply every real request took that branch, none
+            # appended input_ids, and the dummies form the batch tail: the
+            # full pass keeps them there and they never join
+            # previous_batch_indices). While the batch composition holds, the
+            # next passes only need to advance the real requests' positions
+            # by one and refresh per-step metadata; the dummies' rows stay
+            # constant.
             # MRoPE models are supported only for batches with no actual mrope
             # work (text-only requests, empty mrope lists below): the full
             # pass routes use_mrope models through the (3,1,N)
@@ -4558,8 +4608,13 @@ class DecoderRunner(ScheduledModelRunner):
                 and not extend_requests
                 and not first_draft_requests
                 and _n_gen > 0
-                and previous_batch_len == _n_gen
+                and previous_batch_len == _n_gen - _n_cuda_graph_dummy
+                and previous_batch_len > 0
                 and num_tokens == 0
+                and (
+                    _n_cuda_graph_dummy == 0
+                    or all(r.is_cuda_graph_dummy for r in generation_requests[previous_batch_len:])
+                )
                 and not _has_any_multimodal_request
                 and not multimodal_params_list
                 and not lora_params
@@ -4570,12 +4625,23 @@ class DecoderRunner(ScheduledModelRunner):
                 self._steady_gen_positions_pinned[:_n_gen].copy_(
                     torch.as_tensor(num_cached_tokens_snapshot, dtype=torch.int)
                 )
+                # The attention metadata prepared by this pass can be advanced
+                # in place by the fast path (TrtllmAttentionMetadata only,
+                # plain decode features) instead of a full re-prepare.
+                incremental = (
+                    hasattr(attn_metadata, "supports_steady_gen_step")
+                    and attn_metadata.supports_steady_gen_step()
+                )
                 self._steady_gen_cache = {
                     "num_requests": _n_gen,
+                    # Real requests come first; [num_real:] are padding dummies.
+                    "num_real": previous_batch_len,
                     "request_ids": all_gen_request_ids,
                     "prompt_lens": prompt_lengths,
                     "seq_lens_ones": maybe_pin_memory(torch.ones(_n_gen, dtype=torch.int)),
                     "use_mrope": _use_mrope,
+                    "attn_metadata": attn_metadata if incremental else None,
+                    "tokens_per_block": getattr(kv_cache_manager, "tokens_per_block", None),
                 }
 
         gather_ids_device = self.gather_ids_cuda[: len(gather_ids)] if enable_spec_decode else None
@@ -4733,40 +4799,12 @@ class DecoderRunner(ScheduledModelRunner):
         ced_enabled = uses_private_decoder_cache(
             getattr(self.model, "model", None), kv_cache_manager
         )
-        graph_requests = scheduled_requests
-        promoted_context_request_ids: frozenset[int] = frozenset()
-        # Non-linear tree input preparation expands runtime_draft_len to the
-        # total tree width after graph selection. Only linear-tree zero-draft
-        # iterations can therefore safely reuse a zero-draft graph.
-        can_promote_spec_decode = not enable_spec_decode or (
-            runtime_draft_len == 0
-            and self._config.spec_config is not None
-            and self._config.spec_config.is_linear_tree
+        graph_requests, promoted_context_request_ids = self.make_graph_batch(
+            scheduled_requests,
+            kv_cache_manager,
+            enable_spec_decode=enable_spec_decode,
+            runtime_draft_len=runtime_draft_len,
         )
-        # TODO: Generalize these conservative gates as actual-draft, beam, and
-        # context-parallel providers for decoder-only LLMs gain support for
-        # promoted final-context rows. Each relaxation must preserve whole-batch
-        # fallback on graph miss and prove parity with the provider's native
-        # q_len=1 path. Encoder-decoder and non-LLM engines remain out of scope.
-        if (
-            scheduled_requests.num_context_requests > 0
-            and scheduled_requests.attention_dp_phase is not RemoteTailPhase.CONTEXT
-            # A physically pruned context cache cannot become a decode
-            # batch, including single-token synthetic prefill warmup rows.
-            and getattr(kv_cache_manager, "context_swa_layer_limit", None) is None
-            and self.cuda_graph_runner.enabled
-            and can_promote_spec_decode
-            and not ced_enabled
-            and not self.use_beam_search
-            and self._context_graph_promotion_supported
-            # PLE owns recurrent n-gram and convolution state. Promoting a
-            # fresh final-context row would skip its cache-slot reset.
-            and not self._model_uses_ple_recurrent_state
-            and self.mapping.cp_size == 1
-        ):
-            graph_requests, promoted_context_request_ids = _make_single_token_context_graph_batch(
-                scheduled_requests, self._is_final_multimodal_context_decode_compatible
-            )
 
         with self.cuda_graph_runner.pad_batch(
             graph_requests, resource_manager, runtime_draft_len
@@ -5295,6 +5333,63 @@ class DecoderRunner(ScheduledModelRunner):
         execution_requests.is_attention_dp_phase_idle = True
         execution_requests.generation_requests = [dummy]
         return execution_requests
+
+    def make_graph_batch(
+        self,
+        scheduled_requests: ScheduledRequests,
+        kv_cache_manager: KVCacheManager | KVCacheManagerV2 | None,
+        *,
+        enable_spec_decode: bool,
+        runtime_draft_len: int,
+    ) -> tuple[ScheduledRequests, frozenset[int]]:
+        """The batch ``forward`` hands to the CUDA-graph runner.
+
+        Final one-token context requests are promoted into a decode-shaped
+        graph candidate when the engine configuration allows it; otherwise the
+        scheduled batch is returned as is with no promoted ids. A pure
+        function of the (execution) batch and config-derived state, so the
+        executor can evaluate it right after scheduling (TLLM_ADP_PACKED_SYNC
+        packs the runner's attention-DP padding vector into its post-schedule
+        exchange, see ``PyTorchModelEngine.make_graph_batch``) and obtain
+        exactly the rows the runner would gather in the forward.
+        """
+        from tensorrt_llm._torch.pyexecutor.ced_replay import uses_private_decoder_cache
+
+        graph_requests = scheduled_requests
+        promoted_context_request_ids: frozenset[int] = frozenset()
+        # Non-linear tree input preparation expands runtime_draft_len to the
+        # total tree width after graph selection. Only linear-tree zero-draft
+        # iterations can therefore safely reuse a zero-draft graph.
+        can_promote_spec_decode = not enable_spec_decode or (
+            runtime_draft_len == 0
+            and self._config.spec_config is not None
+            and self._config.spec_config.is_linear_tree
+        )
+        # TODO: Generalize these conservative gates as actual-draft, beam, and
+        # context-parallel providers for decoder-only LLMs gain support for
+        # promoted final-context rows. Each relaxation must preserve whole-batch
+        # fallback on graph miss and prove parity with the provider's native
+        # q_len=1 path. Encoder-decoder and non-LLM engines remain out of scope.
+        if (
+            scheduled_requests.num_context_requests > 0
+            and scheduled_requests.attention_dp_phase is not RemoteTailPhase.CONTEXT
+            # A physically pruned context cache cannot become a decode
+            # batch, including single-token synthetic prefill warmup rows.
+            and getattr(kv_cache_manager, "context_swa_layer_limit", None) is None
+            and self.cuda_graph_runner.enabled
+            and can_promote_spec_decode
+            and not uses_private_decoder_cache(getattr(self.model, "model", None), kv_cache_manager)
+            and not self.use_beam_search
+            and self._context_graph_promotion_supported
+            # PLE owns recurrent n-gram and convolution state. Promoting a
+            # fresh final-context row would skip its cache-slot reset.
+            and not self._model_uses_ple_recurrent_state
+            and self.mapping.cp_size == 1
+        ):
+            graph_requests, promoted_context_request_ids = _make_single_token_context_graph_batch(
+                scheduled_requests, self._is_final_multimodal_context_decode_compatible
+            )
+        return graph_requests, promoted_context_request_ids
 
     @staticmethod
     def _restore_attention_dp_semantic_outputs(
