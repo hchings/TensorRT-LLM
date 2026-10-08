@@ -215,7 +215,12 @@ HARMONY_COUNT = (
     "Harmony prompt (12 for a one-line request); it now counts the prompt the chat route "
     "executes (73)"
 )
-_declare(["harmony"], ["chat.tool_choice_required"], ["router"], ROUTER_NO_WRITE_BACK)
+_declare(
+    ["harmony"],
+    ["chat.tool_choice_required", "chat.named_tool_choice"],
+    ["router"],
+    ROUTER_NO_WRITE_BACK,
+)
 _declare(
     ["harmony"], ["anthropic.plain", "anthropic.system_tools"], ["count_tokens"], HARMONY_COUNT
 )
