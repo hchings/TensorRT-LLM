@@ -42,7 +42,7 @@ pytestmark = [pytest.mark.cpu_only, pytest.mark.threadleak(enabled=False)]
 
 # Tokenizers whose prompts the renderer supports (a model whose own processor builds the
 # prompt, and a tokenizer that cannot encode special tokens, are covered by other tests).
-TOKENIZERS = ("bpe_jinja", "bpe_k3", "bpe_native", "dsv32", "dsv4")
+TOKENIZERS = ("bpe_jinja", "bpe_k3", "bpe_native", "dsv32", "dsv4", "harmony")
 OPTIONS = ("python_api", "embedded_routes", "standalone_http")
 
 
@@ -59,7 +59,12 @@ def _cases():
             # ids are deliberately untrusted there (tested in test_render_http).
             if _is_named_tool_choice(case["request"]):
                 continue
-            yield pytest.param(tokenizer_id, case["id"], id=f"{tokenizer_id}-{case['id']}")
+            yield pytest.param(
+                tokenizer_id,
+                case["id"],
+                id=f"{tokenizer_id}-{case['id']}",
+                marks=[golden.needs_harmony_vocab] if tokenizer_id == "harmony" else [],
+            )
 
 
 CASES = list(_cases())
