@@ -1,0 +1,1275 @@
+{
+ "meta": {
+  "base_commit": "4a36c5b2fb1c8f8ff59c1fb1ebef0ed3b385936e",
+  "generator_version": 1,
+  "transformers": "5.5.4",
+  "tokenizers": "0.22.2",
+  "python": "3.12.3",
+  "tokenizer_id": "bpe_k3",
+  "model_type": "kimi_k3",
+  "tokenizer": {
+   "class": "transformers.tokenization_utils_tokenizers.TokenizersBackend",
+   "vocab_size": 360,
+   "vocab_sha256": "1a53d4cc8e6bcb84815652b7786de912c33f19c6cf43a88ffff67aa3c2c9f0f8"
+  }
+ },
+ "cases": [
+  {
+   "id": "chat.three_turns",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.tools_required",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "description": "Get the weather.",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    ],
+    "tool_choice": "required"
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[tool_choice=required][tools:get_weather]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        86,
+        266,
+        65,
+        339,
+        31,
+        267,
+        83,
+        87,
+        75,
+        267,
+        70,
+        63,
+        61,
+        86,
+        266,
+        85,
+        28,
+        299,
+        65,
+        288,
+        63,
+        201,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       61,
+       86,
+       266,
+       85,
+       28,
+       299,
+       65,
+       288,
+       63,
+       201,
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.thinking_effort",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "thinking": {
+     "type": "enabled",
+     "effort": "high"
+    }
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[thinking=True][effort=high][thinking]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        320,
+        303,
+        31,
+        54,
+        84,
+        87,
+        71,
+        63,
+        61,
+        71,
+        72,
+        298,
+        86,
+        31,
+        74,
+        75,
+        73,
+        74,
+        63,
+        61,
+        320,
+        303,
+        63,
+        201,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.reasoning_effort",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "reasoning_effort": "low"
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[effort=low]<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        71,
+        72,
+        298,
+        86,
+        31,
+        78,
+        81,
+        89,
+        63,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.response_format_json_object",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "response_format": {
+     "type": "json_object"
+    }
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[rf=json_object]<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        84,
+        72,
+        31,
+        76,
+        85,
+        281,
+        65,
+        81,
+        68,
+        76,
+        71,
+        69,
+        86,
+        63,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.response_format_json_schema",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "response_format": {
+     "type": "json_schema",
+     "json_schema": {
+      "name": "n",
+      "schema": {
+       "type": "object"
+      }
+     }
+    }
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[rf=json_schema][schema]<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        84,
+        72,
+        31,
+        76,
+        85,
+        281,
+        65,
+        85,
+        264,
+        295,
+        67,
+        63,
+        61,
+        85,
+        264,
+        295,
+        67,
+        63,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.dynamic_tools",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "system",
+      "content": "",
+      "tools": [
+       {
+        "type": "function",
+        "function": {
+         "name": "get_weather",
+         "description": "Get the weather.",
+         "parameters": {
+          "type": "object",
+          "properties": {
+           "city": {
+            "type": "string"
+           }
+          }
+         }
+        }
+       }
+      ]
+     },
+     {
+      "role": "user",
+      "content": "hello world"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<system><user>hello world<assistant>",
+       "ids": [
+        30,
+        314,
+        352,
+        32,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       314,
+       352,
+       32,
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      314,
+      352,
+      32,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.tools_plain",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "description": "Get the weather.",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[tools:get_weather]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        86,
+        266,
+        85,
+        28,
+        299,
+        65,
+        288,
+        63,
+        201,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       61,
+       86,
+       266,
+       85,
+       28,
+       299,
+       65,
+       288,
+       63,
+       201,
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[tools:get_weather]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "completion.string",
+   "kind": "completion",
+   "request": {
+    "model": "m",
+    "prompt": "hello world"
+   },
+   "server": {},
+   "results": {
+    "completion": {
+     "prompts": [
+      {
+       "text": null,
+       "ids": [
+        0,
+        349,
+        81,
+        335,
+        304
+       ]
+      }
+     ]
+    }
+   }
+  }
+ ]
+}
