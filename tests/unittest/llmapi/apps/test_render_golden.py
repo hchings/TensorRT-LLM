@@ -211,6 +211,44 @@ _declare(
     ROUTER_APPLIES_EXTENSION,
 )
 
+ROUTER_SERVER_TEMPLATE_NO_WRITE_BACK = (
+    "a worker started with --chat_template renders differently from a router that does not "
+    "know that template; the old router wrote back its own ids anyway (replacing what the "
+    "worker would execute). It now forwards ids only to workers whose rendering fingerprint, "
+    "server template included, matches its own"
+)
+_declare(
+    ["bpe_jinja"],
+    ["chat.server_template", "chat.request_over_server_template"],
+    ["router"],
+    ROUTER_SERVER_TEMPLATE_NO_WRITE_BACK,
+)
+ROUTER_CONTEXT_NO_WRITE_BACK = (
+    "the worker derives a decision from the rendered prompt (kimi_k3's usage adjustment, or the "
+    "reasoning mode a template prefills) that a forwarded request cannot carry, so the old "
+    "write-back silently dropped it; the router now keeps routing on its ids but leaves the "
+    "rendering to the worker"
+)
+_declare(
+    ["bpe_k3"],
+    ["chat.three_turns", "chat.dynamic_tools", "chat.tools_plain"],
+    ["router"],
+    ROUTER_CONTEXT_NO_WRITE_BACK,
+)
+_declare(
+    ["dsv32", "dsv4"],
+    [
+        "chat.single",
+        "chat.three_turns",
+        "chat.tools",
+        "chat.documents",
+        "chat.thinking_kwarg",
+        "chat.tool_loop",
+        "chat.reasoning_history",
+    ],
+    ["router"],
+    ROUTER_CONTEXT_NO_WRITE_BACK,
+)
 ROUTER_MEDIA_NO_WRITE_BACK = (
     "for a request with media, the router wrote back ids rendered from the raw image data URLs "
     "as if they were text (a prompt no worker would execute); it now routes on an estimate and "
@@ -616,6 +654,7 @@ def drive_mm_encoder(entry, case):
 
 def drive_router(entry, case):
     from tensorrt_llm.serve.openai_protocol import ChatCompletionRequest, CompletionRequest
+    from tensorrt_llm.serve.render import RenderResources
     from tensorrt_llm.serve.router import KvCacheAwareRouter
 
     router = KvCacheAwareRouter(
@@ -636,8 +675,12 @@ def drive_router(entry, case):
         except Exception as exc:  # noqa: BLE001 - the request model's own rejection
             return {"request_error": str(exc)[:400]}
         if case["kind"] == "chat":
-            # A worker that reports the same rendering configuration, so ids are forwarded.
-            fingerprint = router._render_resources("m").fingerprint()
+            # A worker with the same configuration, so ids are forwarded. Its fingerprint is
+            # built from a worker-shaped server (as a real worker reports it), not copied from
+            # the router's own resources, so a difference in how the two sides describe the
+            # same configuration would show up as a missing write-back.
+            worker = _stub_server(entry, _cfg(entry, case), [])
+            fingerprint = RenderResources.from_server(worker).fingerprint()
             router._server_info = {"s1": {"render_fingerprint": fingerprint}}
         try:
             token_lists = router._tokenize(request)
