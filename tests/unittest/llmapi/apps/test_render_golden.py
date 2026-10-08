@@ -46,6 +46,28 @@ pytestmark = [pytest.mark.cpu_only, pytest.mark.threadleak(enabled=False)]
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "render_golden")
 
+
+def _harmony_vocab_dir():
+    """Directory with the real ``o200k_base`` vocabulary Harmony needs, or None."""
+    candidates = [os.environ.get("TIKTOKEN_ENCODINGS_BASE")]
+    try:
+        from utils.llm_data import llm_datasets_root
+
+        candidates.append(os.path.join(llm_datasets_root(), "tiktoken_vocab"))
+    except Exception:  # noqa: BLE001 - LLM_MODELS_ROOT is not set on every machine
+        pass
+    for candidate in candidates:
+        if candidate and os.path.exists(os.path.join(candidate, "o200k_base.tiktoken")):
+            return candidate
+    return None
+
+
+HARMONY_VOCAB_DIR = _harmony_vocab_dir()
+if HARMONY_VOCAB_DIR:
+    # Read when the Harmony adapter is first created, so set before anything builds one.
+    os.environ["TIKTOKEN_RS_CACHE_DIR"] = HARMONY_VOCAB_DIR
+    os.environ["TIKTOKEN_ENCODINGS_BASE"] = HARMONY_VOCAB_DIR
+
 # --------------------------------------------------------------------------------------
 # What changed on purpose. (tokenizer id, case id, path) -> why. Anything else must be equal.
 # --------------------------------------------------------------------------------------
@@ -188,6 +210,16 @@ _declare(
     ROUTER_APPLIES_EXTENSION,
 )
 
+HARMONY_COUNT = (
+    "count_tokens for a Harmony (gpt-oss) model counted a chat-template estimate unrelated to the "
+    "Harmony prompt (12 for a one-line request); it now counts the prompt the chat route "
+    "executes (73)"
+)
+_declare(["harmony"], ["chat.tool_choice_required"], ["router"], ROUTER_NO_WRITE_BACK)
+_declare(
+    ["harmony"], ["anthropic.plain", "anthropic.system_tools"], ["count_tokens"], HARMONY_COUNT
+)
+
 # --------------------------------------------------------------------------------------
 # Tokenizers: rebuilt exactly as when the fixtures were recorded (the vocabulary hash in
 # each fixture's meta proves it)
@@ -314,6 +346,8 @@ def build_tokenizers() -> Dict[str, Dict[str, Any]]:
     out["tiktoken_like"] = dict(
         tokenizer=_wrap(tiktoken), raw=tiktoken, model_type="golden-generic"
     )
+    # gpt-oss: Harmony renders token ids itself from the real o200k_base vocabulary.
+    out["harmony"] = dict(tokenizer=_wrap(plain), raw=plain, model_type="gpt_oss", harmony=True)
     return out
 
 
@@ -388,6 +422,8 @@ def _stub_server(entry, cfg, captured):
     server.chat_template = cfg["chat_template"]
     server.tool_parser = cfg["tool_parser"]
     server.tool_call_id_type = "random"
+    server.use_harmony = bool(entry.get("harmony"))
+    server.harmony_adapter = None
     server.multimodal_server_config = None
     server.generator = SimpleNamespace(
         args=SimpleNamespace(
@@ -458,6 +494,13 @@ def _message(payload):
 def drive_chat(entry, case):
     captured: list = []
     server = _stub_server(entry, _cfg(entry, case), captured)
+    if entry.get("harmony"):
+        # The Harmony route's response handling is not stubbed; what matters is the prompt
+        # it hands the engine, or the reason it refused.
+        status, payload = _post("/v1/chat/completions", server.chat_harmony, case["body"])
+        if captured:
+            return {"prompts": _record_prompts(entry, captured)}
+        return {"status": status, "error": _message(payload)}
     status, payload = _post("/v1/chat/completions", server.openai_chat, case["body"])
     if status != 200:
         return {"status": status, "error": _message(payload)}
@@ -502,7 +545,7 @@ def drive_router(entry, case):
         use_tokens=False,
         max_batch_size=32,
         tokens_per_block=32,
-        use_harmony=False,
+        use_harmony=bool(entry.get("harmony")),
     )
     with mock.patch.object(router, "_get_tokenizer", return_value=entry["raw"]):
         # The router resolves the model type from a checkpoint path; give it one.
@@ -650,8 +693,19 @@ def _load_fixtures() -> Dict[str, Dict[str, Any]]:
 
 
 FIXTURES = _load_fixtures()
+needs_harmony_vocab = pytest.mark.skipif(
+    HARMONY_VOCAB_DIR is None,
+    reason="the Harmony cases need the o200k_base vocabulary: set TIKTOKEN_ENCODINGS_BASE "
+    "or LLM_MODELS_ROOT (datasets/tiktoken_vocab)",
+)
 PARAMS = [
-    pytest.param(tok, case["id"], path, id=f"{tok}-{case['id']}-{path}")
+    pytest.param(
+        tok,
+        case["id"],
+        path,
+        id=f"{tok}-{case['id']}-{path}",
+        marks=[needs_harmony_vocab] if tok == "harmony" else [],
+    )
     for tok, document in FIXTURES.items()
     for case in document["cases"]
     for path in case["results"]
@@ -678,8 +732,16 @@ def test_the_fixtures_exist() -> None:
         "dsv4",
         "passthrough",
         "tiktoken_like",
+        "harmony",
     }
     assert len(PARAMS) > 300
+
+
+@needs_harmony_vocab
+def test_the_harmony_vocabulary_is_the_one_the_fixture_was_recorded_with() -> None:
+    with open(os.path.join(HARMONY_VOCAB_DIR, "o200k_base.tiktoken"), "rb") as handle:
+        digest = hashlib.sha256(handle.read()).hexdigest()
+    assert digest == FIXTURES["harmony"]["meta"]["harmony_vocab_sha256"]
 
 
 @pytest.mark.parametrize("tokenizer_id", sorted(FIXTURES))
