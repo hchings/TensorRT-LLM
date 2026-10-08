@@ -1,0 +1,1344 @@
+{
+ "meta": {
+  "base_commit": "4a36c5b2fb1c8f8ff59c1fb1ebef0ed3b385936e",
+  "generator_version": 1,
+  "transformers": "5.5.4",
+  "tokenizers": "0.22.2",
+  "python": "3.12.3",
+  "tokenizer_id": "tiktoken_like",
+  "model_type": "golden-generic",
+  "tokenizer": {
+   "class": "__main__._tiktoken_like_class.<locals>.TiktokenLikeTokenizer",
+   "vocab_size": 360,
+   "vocab_sha256": "1a53d4cc8e6bcb84815652b7786de912c33f19c6cf43a88ffff67aa3c2c9f0f8"
+  }
+ },
+ "cases": [
+  {
+   "id": "chat.single",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>",
+       "ids": [
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.three_turns",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.tools",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "description": "Get the weather.",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[tools:get_weather]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        86,
+        266,
+        85,
+        28,
+        299,
+        65,
+        288,
+        63,
+        201,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[tools:get_weather]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.documents",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "documents": [
+     {
+      "title": "Paris",
+      "text": "x"
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[doc:Paris|x]<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        293,
+        69,
+        28,
+        50,
+        347,
+        94,
+        90,
+        63,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      61,
+      293,
+      69,
+      28,
+      50,
+      347,
+      94,
+      90,
+      63,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[doc:Paris|x]<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.add_special_tokens",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     }
+    ],
+    "max_tokens": 4,
+    "add_special_tokens": true
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>",
+       "ids": [
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.thinking_kwarg",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "chat_template_kwargs": {
+     "thinking": true
+    }
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[thinking]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": [
+        61,
+        320,
+        303,
+        63,
+        201,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        86,
+        301,
+        325,
+        324,
+        344,
+        30,
+        321,
+        32,
+        299,
+        336,
+        329,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      61,
+      320,
+      303,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      61,
+      320,
+      303,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[thinking]\n<user>hello world<assistant>this is a test<user>get the weather<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.tool_loop",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "get_weather",
+         "arguments": "{\"city\": \"paris\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "sunny"
+     },
+     {
+      "role": "assistant",
+      "content": "it is sunny"
+     },
+     {
+      "role": "user",
+      "content": "thanks"
+     }
+    ],
+    "max_tokens": 4,
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "description": "Get the weather.",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[tools:get_weather]\n<user>hello world<assistant>[call:get_weather({\"city\": \"paris\"})]<tool>sunny<assistant>it is sunny<user>thanks<assistant>",
+       "ids": [
+        61,
+        86,
+        266,
+        85,
+        28,
+        299,
+        65,
+        288,
+        63,
+        201,
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        61,
+        69,
+        289,
+        28,
+        299,
+        65,
+        288,
+        10,
+        93,
+        4,
+        69,
+        350,
+        4,
+        28,
+        223,
+        4,
+        82,
+        347,
+        4,
+        95,
+        11,
+        63,
+        30,
+        86,
+        266,
+        32,
+        85,
+        87,
+        80,
+        80,
+        91,
+        30,
+        273,
+        359,
+        32,
+        277,
+        325,
+        223,
+        85,
+        87,
+        80,
+        80,
+        91,
+        30,
+        321,
+        32,
+        86,
+        74,
+        67,
+        80,
+        77,
+        85,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      61,
+      69,
+      289,
+      28,
+      299,
+      65,
+      288,
+      10,
+      93,
+      4,
+      69,
+      350,
+      4,
+      28,
+      223,
+      4,
+      82,
+      347,
+      4,
+      95,
+      11,
+      63,
+      30,
+      86,
+      266,
+      32,
+      85,
+      87,
+      80,
+      80,
+      91,
+      30,
+      273,
+      359,
+      32,
+      277,
+      325,
+      223,
+      85,
+      87,
+      80,
+      80,
+      91,
+      30,
+      321,
+      32,
+      86,
+      74,
+      67,
+      80,
+      77,
+      85,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      61,
+      69,
+      289,
+      28,
+      299,
+      65,
+      288,
+      10,
+      93,
+      4,
+      69,
+      350,
+      4,
+      28,
+      223,
+      4,
+      82,
+      347,
+      4,
+      95,
+      11,
+      63,
+      30,
+      86,
+      266,
+      32,
+      85,
+      87,
+      80,
+      80,
+      91,
+      30,
+      273,
+      359,
+      32,
+      277,
+      325,
+      223,
+      85,
+      87,
+      80,
+      80,
+      91,
+      30,
+      321,
+      32,
+      86,
+      74,
+      67,
+      80,
+      77,
+      85,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "[tools:get_weather]\n<user>hello world<assistant>[call:get_weather({\"city\": \"paris\"})]<tool>sunny<assistant>it is sunny<user>thanks<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.reasoning_history",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "answer",
+      "reasoning_content": "thinking about it"
+     },
+     {
+      "role": "user",
+      "content": "again"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>[reasoning:thinking about it]answer<user>again<assistant>",
+       "ids": [
+        30,
+        321,
+        32,
+        349,
+        81,
+        335,
+        304,
+        30,
+        273,
+        359,
+        32,
+        61,
+        267,
+        273,
+        351,
+        28,
+        320,
+        303,
+        324,
+        68,
+        81,
+        87,
+        86,
+        223,
+        277,
+        63,
+        67,
+        80,
+        85,
+        89,
+        261,
+        30,
+        321,
+        32,
+        67,
+        73,
+        67,
+        262,
+        30,
+        273,
+        359,
+        32
+       ]
+      }
+     ]
+    },
+    "router": {
+     "error": "TypeError: encode() got an unexpected keyword argument 'add_special_tokens'"
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      61,
+      267,
+      273,
+      351,
+      28,
+      320,
+      303,
+      324,
+      68,
+      81,
+      87,
+      86,
+      223,
+      277,
+      63,
+      67,
+      80,
+      85,
+      89,
+      261,
+      30,
+      321,
+      32,
+      67,
+      73,
+      67,
+      262,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "responses": {
+     "ids": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      61,
+      267,
+      273,
+      351,
+      28,
+      320,
+      303,
+      324,
+      68,
+      81,
+      87,
+      86,
+      223,
+      277,
+      63,
+      67,
+      80,
+      85,
+      89,
+      261,
+      30,
+      321,
+      32,
+      67,
+      73,
+      67,
+      262,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "<user>hello world<assistant>[reasoning:thinking about it]answer<user>again<assistant>",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "completion.string",
+   "kind": "completion",
+   "request": {
+    "model": "m",
+    "prompt": "hello world"
+   },
+   "server": {},
+   "results": {
+    "completion": {
+     "prompts": [
+      {
+       "text": null,
+       "ids": [
+        349,
+        81,
+        335,
+        304
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       0,
+       349,
+       81,
+       335,
+       304
+      ]
+     ],
+     "prompt_after": [
+      0,
+      349,
+      81,
+      335,
+      304
+     ]
+    }
+   }
+  },
+  {
+   "id": "anthropic.plain",
+   "kind": "anthropic",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "count_tokens": {
+     "status": 200,
+     "input_tokens": 11
+    }
+   }
+  }
+ ]
+}

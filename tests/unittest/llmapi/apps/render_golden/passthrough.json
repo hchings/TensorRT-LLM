@@ -1,0 +1,1678 @@
+{
+ "meta": {
+  "base_commit": "4a36c5b2fb1c8f8ff59c1fb1ebef0ed3b385936e",
+  "generator_version": 1,
+  "transformers": "5.5.4",
+  "tokenizers": "0.22.2",
+  "python": "3.12.3",
+  "tokenizer_id": "passthrough",
+  "model_type": "mistral_common",
+  "tokenizer": {
+   "class": "transformers.tokenization_utils_tokenizers.TokenizersBackend",
+   "vocab_size": 360,
+   "vocab_sha256": "1a53d4cc8e6bcb84815652b7786de912c33f19c6cf43a88ffff67aa3c2c9f0f8"
+  }
+ },
+ "cases": [
+  {
+   "id": "chat.single",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello world",
+       "ids": [
+        349,
+        81,
+        335,
+        304
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d"
+     ]
+    },
+    "responses": {
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello world",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.three_turns",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": [
+        349,
+        81,
+        335,
+        304,
+        86,
+        301,
+        325,
+        324,
+        344,
+        299,
+        336,
+        329
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "t",
+      "h",
+      "i",
+      "s",
+      " ",
+      "i",
+      "s",
+      " ",
+      "a",
+      " ",
+      "t",
+      "e",
+      "s",
+      "t",
+      "g",
+      "e",
+      "t",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "w",
+      "e",
+      "a",
+      "t",
+      "h",
+      "e",
+      "r"
+     ]
+    },
+    "responses": {
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "t",
+      "h",
+      "i",
+      "s",
+      " ",
+      "i",
+      "s",
+      " ",
+      "a",
+      " ",
+      "t",
+      "e",
+      "s",
+      "t",
+      "g",
+      "e",
+      "t",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "w",
+      "e",
+      "a",
+      "t",
+      "h",
+      "e",
+      "r"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.tools",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "description": "Get the weather.",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": [
+        349,
+        81,
+        335,
+        304,
+        86,
+        301,
+        325,
+        324,
+        344,
+        299,
+        336,
+        329
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       61,
+       86,
+       266,
+       85,
+       28,
+       299,
+       65,
+       288,
+       63,
+       201,
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "t",
+      "h",
+      "i",
+      "s",
+      " ",
+      "i",
+      "s",
+      " ",
+      "a",
+      " ",
+      "t",
+      "e",
+      "s",
+      "t",
+      "g",
+      "e",
+      "t",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "w",
+      "e",
+      "a",
+      "t",
+      "h",
+      "e",
+      "r"
+     ]
+    },
+    "responses": {
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "t",
+      "h",
+      "i",
+      "s",
+      " ",
+      "i",
+      "s",
+      " ",
+      "a",
+      " ",
+      "t",
+      "e",
+      "s",
+      "t",
+      "g",
+      "e",
+      "t",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "w",
+      "e",
+      "a",
+      "t",
+      "h",
+      "e",
+      "r"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.documents",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "documents": [
+     {
+      "title": "Paris",
+      "text": "x"
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": [
+        349,
+        81,
+        335,
+        304,
+        86,
+        301,
+        325,
+        324,
+        344,
+        299,
+        336,
+        329
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       61,
+       293,
+       69,
+       28,
+       50,
+       347,
+       94,
+       90,
+       63,
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      61,
+      293,
+      69,
+      28,
+      50,
+      347,
+      94,
+      90,
+      63,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "t",
+      "h",
+      "i",
+      "s",
+      " ",
+      "i",
+      "s",
+      " ",
+      "a",
+      " ",
+      "t",
+      "e",
+      "s",
+      "t",
+      "g",
+      "e",
+      "t",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "w",
+      "e",
+      "a",
+      "t",
+      "h",
+      "e",
+      "r"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.add_special_tokens",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     }
+    ],
+    "max_tokens": 4,
+    "add_special_tokens": true
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello world",
+       "ids": [
+        0,
+        349,
+        81,
+        335,
+        304
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d"
+     ]
+    },
+    "responses": {
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello world",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.thinking_kwarg",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "this is a test"
+     },
+     {
+      "role": "user",
+      "content": "get the weather"
+     }
+    ],
+    "max_tokens": 4,
+    "chat_template_kwargs": {
+     "thinking": true
+    }
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": [
+        349,
+        81,
+        335,
+        304,
+        86,
+        301,
+        325,
+        324,
+        344,
+        299,
+        336,
+        329
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       61,
+       320,
+       303,
+       63,
+       201,
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       86,
+       301,
+       325,
+       324,
+       344,
+       30,
+       321,
+       32,
+       299,
+       336,
+       329,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      61,
+      320,
+      303,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      86,
+      301,
+      325,
+      324,
+      344,
+      30,
+      321,
+      32,
+      299,
+      336,
+      329,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "t",
+      "h",
+      "i",
+      "s",
+      " ",
+      "i",
+      "s",
+      " ",
+      "a",
+      " ",
+      "t",
+      "e",
+      "s",
+      "t",
+      "g",
+      "e",
+      "t",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "w",
+      "e",
+      "a",
+      "t",
+      "h",
+      "e",
+      "r"
+     ]
+    },
+    "responses": {
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "t",
+      "h",
+      "i",
+      "s",
+      " ",
+      "i",
+      "s",
+      " ",
+      "a",
+      " ",
+      "t",
+      "e",
+      "s",
+      "t",
+      "g",
+      "e",
+      "t",
+      " ",
+      "t",
+      "h",
+      "e",
+      " ",
+      "w",
+      "e",
+      "a",
+      "t",
+      "h",
+      "e",
+      "r"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldthis is a testget the weather",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.tool_loop",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+       {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+         "name": "get_weather",
+         "arguments": "{\"city\": \"paris\"}"
+        }
+       }
+      ]
+     },
+     {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "sunny"
+     },
+     {
+      "role": "assistant",
+      "content": "it is sunny"
+     },
+     {
+      "role": "user",
+      "content": "thanks"
+     }
+    ],
+    "max_tokens": 4,
+    "tools": [
+     {
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "description": "Get the weather.",
+       "parameters": {
+        "type": "object",
+        "properties": {
+         "city": {
+          "type": "string"
+         }
+        }
+       }
+      }
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldsunnyit is sunnythanks",
+       "ids": [
+        349,
+        81,
+        335,
+        304,
+        85,
+        87,
+        80,
+        80,
+        91,
+        277,
+        325,
+        223,
+        85,
+        87,
+        80,
+        80,
+        91,
+        86,
+        74,
+        67,
+        80,
+        77,
+        85
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       61,
+       86,
+       266,
+       85,
+       28,
+       299,
+       65,
+       288,
+       63,
+       201,
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       61,
+       69,
+       289,
+       28,
+       299,
+       65,
+       288,
+       10,
+       93,
+       4,
+       69,
+       350,
+       4,
+       28,
+       223,
+       4,
+       82,
+       347,
+       4,
+       95,
+       11,
+       63,
+       30,
+       86,
+       266,
+       32,
+       85,
+       87,
+       80,
+       80,
+       91,
+       30,
+       273,
+       359,
+       32,
+       277,
+       325,
+       223,
+       85,
+       87,
+       80,
+       80,
+       91,
+       30,
+       321,
+       32,
+       86,
+       74,
+       67,
+       80,
+       77,
+       85,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      61,
+      86,
+      266,
+      85,
+      28,
+      299,
+      65,
+      288,
+      63,
+      201,
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      61,
+      69,
+      289,
+      28,
+      299,
+      65,
+      288,
+      10,
+      93,
+      4,
+      69,
+      350,
+      4,
+      28,
+      223,
+      4,
+      82,
+      347,
+      4,
+      95,
+      11,
+      63,
+      30,
+      86,
+      266,
+      32,
+      85,
+      87,
+      80,
+      80,
+      91,
+      30,
+      273,
+      359,
+      32,
+      277,
+      325,
+      223,
+      85,
+      87,
+      80,
+      80,
+      91,
+      30,
+      321,
+      32,
+      86,
+      74,
+      67,
+      80,
+      77,
+      85,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "s",
+      "u",
+      "n",
+      "n",
+      "y",
+      "i",
+      "t",
+      " ",
+      "i",
+      "s",
+      " ",
+      "s",
+      "u",
+      "n",
+      "n",
+      "y",
+      "t",
+      "h",
+      "a",
+      "n",
+      "k",
+      "s"
+     ]
+    },
+    "responses": {
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "s",
+      "u",
+      "n",
+      "n",
+      "y",
+      "i",
+      "t",
+      " ",
+      "i",
+      "s",
+      " ",
+      "s",
+      "u",
+      "n",
+      "n",
+      "y",
+      "t",
+      "h",
+      "a",
+      "n",
+      "k",
+      "s"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldsunnyit is sunnythanks",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chat.reasoning_history",
+   "kind": "chat",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     },
+     {
+      "role": "assistant",
+      "content": "answer",
+      "reasoning_content": "thinking about it"
+     },
+     {
+      "role": "user",
+      "content": "again"
+     }
+    ],
+    "max_tokens": 4
+   },
+   "server": {},
+   "results": {
+    "chat": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldansweragain",
+       "ids": [
+        349,
+        81,
+        335,
+        304,
+        67,
+        80,
+        85,
+        89,
+        261,
+        67,
+        73,
+        67,
+        262
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       30,
+       321,
+       32,
+       349,
+       81,
+       335,
+       304,
+       30,
+       273,
+       359,
+       32,
+       61,
+       267,
+       273,
+       351,
+       28,
+       320,
+       303,
+       324,
+       68,
+       81,
+       87,
+       86,
+       223,
+       277,
+       63,
+       67,
+       80,
+       85,
+       89,
+       261,
+       30,
+       321,
+       32,
+       67,
+       73,
+       67,
+       262,
+       30,
+       273,
+       359,
+       32
+      ]
+     ],
+     "wrote_back": [
+      30,
+      321,
+      32,
+      349,
+      81,
+      335,
+      304,
+      30,
+      273,
+      359,
+      32,
+      61,
+      267,
+      273,
+      351,
+      28,
+      320,
+      303,
+      324,
+      68,
+      81,
+      87,
+      86,
+      223,
+      277,
+      63,
+      67,
+      80,
+      85,
+      89,
+      261,
+      30,
+      321,
+      32,
+      67,
+      73,
+      67,
+      262,
+      30,
+      273,
+      359,
+      32
+     ]
+    },
+    "governor": {
+     "status": 200,
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "a",
+      "n",
+      "s",
+      "w",
+      "e",
+      "r",
+      "a",
+      "g",
+      "a",
+      "i",
+      "n"
+     ]
+    },
+    "responses": {
+     "ids": [
+      "h",
+      "e",
+      "l",
+      "l",
+      "o",
+      " ",
+      "w",
+      "o",
+      "r",
+      "l",
+      "d",
+      "a",
+      "n",
+      "s",
+      "w",
+      "e",
+      "r",
+      "a",
+      "g",
+      "a",
+      "i",
+      "n"
+     ]
+    },
+    "mm_encoder": {
+     "status": 200,
+     "prompts": [
+      {
+       "text": "hello worldansweragain",
+       "ids": null
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "completion.string",
+   "kind": "completion",
+   "request": {
+    "model": "m",
+    "prompt": "hello world"
+   },
+   "server": {},
+   "results": {
+    "completion": {
+     "prompts": [
+      {
+       "text": null,
+       "ids": [
+        0,
+        349,
+        81,
+        335,
+        304
+       ]
+      }
+     ]
+    },
+    "router": {
+     "token_lists": [
+      [
+       0,
+       349,
+       81,
+       335,
+       304
+      ]
+     ],
+     "prompt_after": [
+      0,
+      349,
+      81,
+      335,
+      304
+     ]
+    }
+   }
+  },
+  {
+   "id": "anthropic.plain",
+   "kind": "anthropic",
+   "request": {
+    "model": "m",
+    "messages": [
+     {
+      "role": "user",
+      "content": "hello world"
+     }
+    ]
+   },
+   "server": {},
+   "results": {
+    "count_tokens": {
+     "status": 200,
+     "input_tokens": 12
+    }
+   }
+  }
+ ]
+}
