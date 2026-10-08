@@ -34,6 +34,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any, Dict, List
@@ -210,6 +211,28 @@ _declare(
     ROUTER_APPLIES_EXTENSION,
 )
 
+ROUTER_MEDIA_NO_WRITE_BACK = (
+    "for a request with media, the router wrote back ids rendered from the raw image data URLs "
+    "as if they were text (a prompt no worker would execute); it now routes on an estimate and "
+    "never writes media requests back"
+)
+_declare(
+    ["mm_string", "mm_openai"], ["mm.server_template"], ["mm_encoder"], SERVER_TEMPLATE_NOW_APPLIES
+)
+_declare(
+    ["mm_string", "mm_openai"],
+    [
+        "mm.one_image",
+        "mm.image_first",
+        "mm.text_image_text",
+        "mm.two_images",
+        "mm.images_across_turns",
+        "mm.system_and_image",
+    ],
+    ["router"],
+    ROUTER_MEDIA_NO_WRITE_BACK,
+)
+
 HARMONY_COUNT = (
     "count_tokens for a Harmony (gpt-oss) model counted a chat-template estimate unrelated to the "
     "Harmony prompt (12 for a one-line request); it now counts the prompt the chat route "
@@ -351,6 +374,13 @@ def build_tokenizers() -> Dict[str, Dict[str, Any]]:
     out["tiktoken_like"] = dict(
         tokenizer=_wrap(tiktoken), raw=tiktoken, model_type="golden-generic"
     )
+    # Multimodal models registered with the placeholder registry: a STRING content format
+    # (placeholders inserted in the text, before it) and an OPENAI one (content parts kept).
+    import tensorrt_llm._torch.models.modeling_llava_next  # noqa: F401
+    import tensorrt_llm._torch.models.modeling_qwen2vl  # noqa: F401
+
+    out["mm_string"] = dict(tokenizer=_wrap(plain), raw=plain, model_type="qwen2_vl")
+    out["mm_openai"] = dict(tokenizer=_wrap(plain), raw=plain, model_type="llava_next")
     # gpt-oss: Harmony renders token ids itself from the real o200k_base vocabulary.
     out["harmony"] = dict(tokenizer=_wrap(plain), raw=plain, model_type="gpt_oss", harmony=True)
     return out
@@ -461,13 +491,56 @@ def _stub_server(entry, cfg, captured):
     return server
 
 
+def _mm_item(item) -> Dict[str, Any]:
+    """What identifies a decoded media item without storing it."""
+    shape = getattr(item, "shape", None)
+    if shape is not None:  # a decoded tensor / array
+        array = item.detach().cpu().numpy() if hasattr(item, "detach") else item
+        return {
+            "type": type(item).__name__,
+            "shape": list(shape),
+            "dtype": str(getattr(item, "dtype", "")),
+            "sha": hashlib.sha256(array.tobytes()).hexdigest()[:16],
+        }
+    mode = getattr(item, "mode", None)
+    if mode is not None and callable(getattr(item, "tobytes", None)):  # a PIL image
+        return {
+            "type": type(item).__name__,
+            "size": list(item.size),
+            "mode": mode,
+            "sha": hashlib.sha256(item.tobytes()).hexdigest()[:16],
+        }
+    return {"type": type(item).__name__}
+
+
+def _mm_summary(inputs) -> Dict[str, Any]:
+    """The multimodal part of what a route hands the engine."""
+    out: Dict[str, Any] = {}
+    for key in ("multi_modal_data", "multi_modal_embeddings"):
+        data = inputs.get(key)
+        if data:
+            out[key] = {modality: [_mm_item(x) for x in items] for modality, items in data.items()}
+    for key in ("mm_item_order", "mm_processor_kwargs"):
+        if inputs.get(key):
+            out[key] = inputs[key]
+    return out
+
+
+def _normalize(result):
+    """Drop memory addresses from error text, as when the fixtures were recorded."""
+    return json.loads(re.sub(r"0x[0-9a-fA-F]{6,}", "0x?", json.dumps(result)))
+
+
 def _record_prompts(entry, captured) -> List[Dict[str, Any]]:
     out = []
     for item in captured:
         inputs = item["inputs"]
         if isinstance(inputs, dict) and "prompt" in inputs:
             ids = _default_ids(entry["tokenizer"], inputs, item["sampling_params"])
-            out.append({"text": inputs["prompt"], "ids": ids})
+            recorded = {"text": inputs["prompt"], "ids": ids}
+            if _mm_summary(inputs):
+                recorded["mm"] = _mm_summary(inputs)
+            out.append(recorded)
         elif isinstance(inputs, dict):
             out.append({"text": None, "ids": list(inputs["prompt_token_ids"])})
         elif isinstance(inputs, str):
@@ -535,6 +608,7 @@ def drive_mm_encoder(entry, case):
             {
                 "text": inputs.get("prompt") if is_dict else None,
                 "ids": inputs.get("prompt_token_ids") if is_dict else None,
+                **({"mm": _mm_summary(inputs)} if is_dict and _mm_summary(inputs) else {}),
             }
         )
     return {"status": status, "prompts": prompts}
@@ -738,6 +812,8 @@ def test_the_fixtures_exist() -> None:
         "passthrough",
         "tiktoken_like",
         "harmony",
+        "mm_string",
+        "mm_openai",
     }
     assert len(PARAMS) > 300
 
@@ -767,7 +843,7 @@ def test_replay(tokenizers, tokenizer_id, case_id, path) -> None:
     assert "driver_error" not in recorded, recorded
     case = {**case, "body": case["request"]}
 
-    replayed = json.loads(json.dumps(DRIVERS[path](tokenizers[tokenizer_id], case)))
+    replayed = _normalize(DRIVERS[path](tokenizers[tokenizer_id], case))
 
     reason = INTENDED_CHANGES.get((tokenizer_id, case_id, path))
     if reason is None:
