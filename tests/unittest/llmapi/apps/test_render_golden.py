@@ -845,6 +845,26 @@ def _no_legacy(monkeypatch):
     monkeypatch.delenv("TRTLLM_RENDER_IGNORED_FIELDS", raising=False)
 
 
+# Harmony puts the current date in its system prompt (``time.strftime("%Y-%m-%d")`` in
+# ``harmony_adapter``), so ids recorded on one day differ on any other. The recorded Harmony
+# fixture is replayed with the date it was recorded on.
+RECORDED_HARMONY_DATE = "2026-10-08"
+
+
+@pytest.fixture(autouse=True)
+def freeze_the_harmony_conversation_date(monkeypatch):
+    try:
+        from tensorrt_llm.serve import harmony_adapter
+    except ImportError:  # no Harmony library: the Harmony cases are skipped anyway
+        return
+    real_strftime = harmony_adapter.time.strftime
+
+    def strftime(fmt, *args):
+        return RECORDED_HARMONY_DATE if fmt == "%Y-%m-%d" else real_strftime(fmt, *args)
+
+    monkeypatch.setattr(harmony_adapter.time, "strftime", strftime)
+
+
 def test_the_fixtures_exist() -> None:
     assert set(FIXTURES) == {
         "bpe_jinja",

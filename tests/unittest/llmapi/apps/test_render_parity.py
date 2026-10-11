@@ -31,12 +31,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tensorrt_llm.serve.render import RenderResources, UnsupportedRenderError
+from tensorrt_llm.serve.render import (
+    RenderResources,
+    UnsupportedRenderError,
+    mount_render_endpoints,
+)
 from tensorrt_llm.serve.render._http import build_render_app
-from tensorrt_llm.serve.render.generate import mount_render_endpoints
 from tensorrt_llm.serve.render.serving import RenderRequestError, ServingRender
 
 from . import test_render_golden as golden
+from .test_render_golden import freeze_the_harmony_conversation_date  # noqa: F401 (autouse fixture)
 
 pytestmark = [pytest.mark.cpu_only, pytest.mark.threadleak(enabled=False)]
 
