@@ -680,6 +680,11 @@ def drive_router(entry, case):
             # the router's own resources, so a difference in how the two sides describe the
             # same configuration would show up as a missing write-back.
             worker = _stub_server(entry, _cfg(entry, case), [])
+            # A real text-only worker's processor is AutoProcessor's fallback: the Hugging Face
+            # tokenizer itself (not the TransformersTokenizer wrapper), carrying its template.
+            # The recorded chat-route replay keeps `None`; only the identity the worker
+            # reports changes.
+            worker.processor = entry["raw"]
             fingerprint = RenderResources.from_server(worker).fingerprint()
             router._server_info = {"s1": {"render_fingerprint": fingerprint}}
         try:
