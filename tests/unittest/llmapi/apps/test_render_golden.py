@@ -684,7 +684,7 @@ def drive_router(entry, case):
             # tokenizer itself (not the TransformersTokenizer wrapper), carrying its template.
             # The recorded chat-route replay keeps `None`; only the identity the worker
             # reports changes.
-            worker.processor = entry["raw"]
+            worker.processor = getattr(entry["raw"], "tokenizer", entry["raw"])
             fingerprint = RenderResources.from_server(worker).fingerprint()
             router._server_info = {"s1": {"render_fingerprint": fingerprint}}
         try:
