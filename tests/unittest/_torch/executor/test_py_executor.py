@@ -1173,6 +1173,7 @@ def _make_executor_with_kv_cache_manager(kv_cache_manager):
         ResourceManagerType.KV_CACHE_MANAGER: kv_cache_manager
     }
     executor.enable_attention_dp = False
+    executor._fetch_hint_enabled = False
     executor._kv_cache_capacity = executor._read_kv_cache_capacity()
     executor._kv_load_tracker = KvLoadTracker(kv_cache_manager, rank=0, enabled=True)
     return executor
@@ -1283,7 +1284,7 @@ def test_idle_entry_refreshes_load_before_waiting():
     class ReachedIdleWait(Exception):
         pass
 
-    def idle_wait(waiting_queue, num_active):
+    def idle_wait(waiting_queue, num_active, **kwargs):
         assert num_active == 0
         assert executor.get_kv_cache_load()["usedKvBlocks"] == 0
         raise ReachedIdleWait
@@ -1369,7 +1370,7 @@ def test_adp_running_counts_update_without_a_new_block_sample():
     class ReachedWait(Exception):
         pass
 
-    def stop_at_wait(*args):
+    def stop_at_wait(*args, **kwargs):
         raise ReachedWait
 
     executor._fetch_and_enqueue_requests = stop_at_wait
