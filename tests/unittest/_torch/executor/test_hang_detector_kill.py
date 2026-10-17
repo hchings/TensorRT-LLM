@@ -212,6 +212,9 @@ def test_control_request_wait_pauses_detector():
     executor.dist = SimpleNamespace(pp_size=1, world_size=1)
     executor.disable_overlap_scheduler = True
     executor.hang_detector = HangDetector(timeout=1, on_detected=lambda: fired.append(1))
+    # The fire point retires the overlap loop's in-flight batch; none here.
+    executor.dist = SimpleNamespace(pp_size=1, world_size=1)
+    executor.disable_overlap_scheduler = True
 
     def complete_control_action():
         # Bounded: if the control request fails before it sets the barrier, an unbounded wait
