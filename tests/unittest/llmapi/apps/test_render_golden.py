@@ -224,28 +224,14 @@ _declare(
     ROUTER_SERVER_TEMPLATE_NO_WRITE_BACK,
 )
 ROUTER_CONTEXT_NO_WRITE_BACK = (
-    "the worker derives a decision from the rendered prompt (kimi_k3's usage adjustment, or the "
-    "reasoning mode a template prefills) that a forwarded request cannot carry, so the old "
-    "write-back silently dropped it; the router now keeps routing on its ids but leaves the "
-    "rendering to the worker"
+    "the worker derives a decision from the rendered prompt (kimi_k3's usage adjustment) that a "
+    "forwarded request cannot carry, so the old write-back silently dropped it; the router now "
+    "keeps routing on its ids but leaves the rendering to the worker. (A reasoning mode a "
+    "template prefills only blocks forwarding to a worker whose parser reads it off the prompt.)"
 )
 _declare(
     ["bpe_k3"],
     ["chat.three_turns", "chat.dynamic_tools", "chat.tools_plain"],
-    ["router"],
-    ROUTER_CONTEXT_NO_WRITE_BACK,
-)
-_declare(
-    ["dsv32", "dsv4"],
-    [
-        "chat.single",
-        "chat.three_turns",
-        "chat.tools",
-        "chat.documents",
-        "chat.thinking_kwarg",
-        "chat.tool_loop",
-        "chat.reasoning_history",
-    ],
     ["router"],
     ROUTER_CONTEXT_NO_WRITE_BACK,
 )
