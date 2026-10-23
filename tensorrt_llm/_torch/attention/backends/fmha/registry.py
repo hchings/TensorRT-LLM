@@ -13,9 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
 import os
 from typing import TypeAlias
 
+from .beam_shared_prefix import BeamSharedPrefixFmha
 from .cute_dsl_mla import CuteDslMlaFmha
 from .fallback import FallbackFmha
 from .flashinfer_trtllm_gen import FlashInferTrtllmGenFmha
@@ -51,17 +53,33 @@ def init_fmha_libs() -> dict[str, "FmhaCls"]:
         "flashinfer_sparse_mla": FlashInferSparseMlaFmha,
         "prims_ts": PrimsTSFmha,
         "prims_ts_block_sparse": PrimsTSBlockSparseFmha,
+        # Opt-in shared-prefix generation path (TLLM_FMHA_LIBS=+beam_shared_prefix).
+        # It must precede flashinfer_trtllm_gen, which takes every generation
+        # batch it supports. It declines eager batches without a shared prefix
+        # but serves every n-sample batch a CUDA graph is captured for.
+        "beam_shared_prefix": BeamSharedPrefixFmha,
         "flashinfer_trtllm_gen": FlashInferTrtllmGenFmha,
         "fallback": FallbackFmha,
     }
 
 
 FMHA_LIBS: dict[str, FmhaCls] = init_fmha_libs()
-DEFAULT_FMHA_LIBS: tuple[str, ...] = tuple(name for name in FMHA_LIBS if name != "prims_ts")
+# Libraries left out of the default set and enabled explicitly through
+# TLLM_FMHA_LIBS: dense PrimTS can add host overhead; beam_shared_prefix is a
+# narrow-scope beam-search path.
+_OPT_IN_FMHA_LIBS: frozenset[str] = frozenset({"prims_ts", "beam_shared_prefix"})
+DEFAULT_FMHA_LIBS: tuple[str, ...] = tuple(
+    name for name in FMHA_LIBS if name not in _OPT_IN_FMHA_LIBS
+)
 
 
 def _parse_fmha_libs_env() -> tuple[str, ...]:
-    value = os.environ.get("TLLM_FMHA_LIBS")
+    return _parse_fmha_libs_value(os.environ.get("TLLM_FMHA_LIBS"))
+
+
+@functools.lru_cache(maxsize=8)
+def _parse_fmha_libs_value(value: str | None) -> tuple[str, ...]:
+    """Parse a ``TLLM_FMHA_LIBS`` value; cached because per-step host code queries it."""
     if value is None or not value.strip():
         return DEFAULT_FMHA_LIBS
 
@@ -105,10 +123,16 @@ def get_enabled_fmha_lib_classes() -> list[FmhaCls]:
     return [FMHA_LIBS[name] for name in _parse_fmha_libs_env()]
 
 
+def is_fmha_lib_enabled(name: str) -> bool:
+    """Whether ``TLLM_FMHA_LIBS`` (or the default set) enables ``name``."""
+    return name in _parse_fmha_libs_env()
+
+
 __all__ = [
     "DEFAULT_FMHA_LIBS",
     "FMHA_LIBS",
     "FmhaCls",
     "get_enabled_fmha_lib_classes",
     "init_fmha_libs",
+    "is_fmha_lib_enabled",
 ]
