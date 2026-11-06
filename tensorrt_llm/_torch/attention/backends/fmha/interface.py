@@ -43,8 +43,17 @@ class Fmha(ABC):
     supports_skip_correction: ClassVar[bool] = False
     supports_block_sparse_inputs: ClassVar[bool] = False
     supports_per_tensor_fp8: ClassVar[bool] = False
+    supports_vc_attention: ClassVar[bool] = False
     supports_workspace_reclamation: bool = False
     supports_fp4_mla: ClassVar[bool] = False
+    # Serves a generation call whose QK-norm / RoPE / KV-append prologue the attention module deferred to the
+    # library (``AttentionForwardArgs.kv_append.fold``): the query input is then the raw QKV projection.
+    supports_deferred_prologue: ClassVar[bool] = False
+    # ``forward`` honours ``attention_input_type=context_only`` on the full tensors of a
+    # mixed batch: it serves only the context requests (tokens ``[0, num_ctx_tokens)``)
+    # and leaves the generation rows' outputs and KV untouched, so a phased library can
+    # serve those rows (``CombinedFmha``).
+    serves_context_only_input: ClassVar[bool] = False
 
     def __init__(self, attn: "TrtllmAttention"):
         self._attn_ref: weakref.ReferenceType["TrtllmAttention"] = weakref.ref(attn)
@@ -125,6 +134,16 @@ class Fmha(ABC):
             or getattr(forward_args, "v_fp8_per_tensor", False)
         ) and not self.supports_per_tensor_fp8:
             logger.debug(f"{type(self).__name__} does not support per-tensor FP8 recipes.")
+            return False
+        if (
+            forward_args.kv_append is not None
+            and forward_args.kv_append.fold is not None
+            and not self.supports_deferred_prologue
+        ):
+            logger.debug(f"{type(self).__name__} does not run a deferred attention prologue.")
+            return False
+        if getattr(forward_args, "vc_attention", False) and not self.supports_vc_attention:
+            logger.debug(f"{type(self).__name__} does not support VC-Attention.")
             return False
         return self._is_supported(q, k, v, metadata, forward_args, phase=phase)
 
