@@ -16,7 +16,7 @@
 import weakref
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import TYPE_CHECKING, ClassVar, Optional, final
+from typing import TYPE_CHECKING, ClassVar, Hashable, Optional, final
 
 import torch
 
@@ -43,8 +43,16 @@ class Fmha(ABC):
     supports_skip_correction: ClassVar[bool] = False
     supports_block_sparse_inputs: ClassVar[bool] = False
     supports_per_tensor_fp8: ClassVar[bool] = False
+    supports_vc_attention: ClassVar[bool] = False
     supports_workspace_reclamation: bool = False
     supports_fp4_mla: ClassVar[bool] = False
+    # Serves a generation call whose QK-norm / RoPE / KV-append prologue the attention module deferred to the
+    # library (``AttentionForwardArgs.kv_append.fold``): the query input is then the raw QKV projection.
+    supports_deferred_prologue: ClassVar[bool] = False
+    supports_variable_window: ClassVar[bool] = False
+    # Field of the iteration-stats record that carries ``step_stats`` (None: the library keeps no
+    # per-step counters).
+    step_stats_field: ClassVar[Optional[str]] = None
 
     def __init__(self, attn: "TrtllmAttention"):
         self._attn_ref: weakref.ReferenceType["TrtllmAttention"] = weakref.ref(attn)
@@ -81,6 +89,39 @@ class Fmha(ABC):
         if getattr(attn, "uses_fp4_mla_attention", False) and not cls.supports_fp4_mla:
             return False
         return cls._is_available(attn)
+
+    @classmethod
+    def plan_step(cls, metadata: "TrtllmAttentionMetadata") -> None:
+        """Per-step host planning, run from ``TrtllmAttentionMetadata.prepare`` for every enabled
+        library that overrides it (``registry.step_planning_fmha_lib_classes``).
+
+        It runs ahead of every forward of the step, so under CUDA graphs it precedes both capture
+        and replay; device tables it refreshes must keep fixed addresses. A library that plans
+        steps disables ``prepare_steady_decode_step``, and the plan state ``is_supported`` reads
+        must be part of ``selection_cache_key``.
+        """
+
+    @classmethod
+    @final
+    def plans_steps(cls) -> bool:
+        """Whether the library overrides ``plan_step``."""
+        return cls.plan_step.__func__ is not Fmha.plan_step.__func__
+
+    @classmethod
+    def selection_cache_key(cls, metadata: "TrtllmAttentionMetadata") -> Hashable:
+        """Per-step plan state ``is_supported`` depends on beyond the batch shape; part of the
+        FMHA selection cache key of a layer that has the library (``FmhaManager``)."""
+        return None
+
+    @classmethod
+    def step_stats(cls, kv_cache_manager: object) -> dict[str, int]:
+        """Cumulative per-step counters of the steps attended on ``kv_cache_manager``'s cache,
+        reported in the iteration-stats record field ``step_stats_field``."""
+        raise NotImplementedError(f"{cls.__name__} keeps no per-step counters.")
+
+    @classmethod
+    def reset_step_stats(cls, kv_cache_manager: object) -> None:
+        """Zero ``step_stats`` of ``kv_cache_manager`` (the executor calls it after warm-up)."""
 
     @classmethod
     def _is_available(cls, attn: "TrtllmAttention") -> bool:
@@ -125,6 +166,23 @@ class Fmha(ABC):
             or getattr(forward_args, "v_fp8_per_tensor", False)
         ) and not self.supports_per_tensor_fp8:
             logger.debug(f"{type(self).__name__} does not support per-tensor FP8 recipes.")
+            return False
+        if (
+            forward_args.kv_append is not None
+            and forward_args.kv_append.fold is not None
+            and not self.supports_deferred_prologue
+        ):
+            logger.debug(f"{type(self).__name__} does not run a deferred attention prologue.")
+            return False
+        if getattr(forward_args, "vc_attention", False) and not self.supports_vc_attention:
+            logger.debug(f"{type(self).__name__} does not support VC-Attention.")
+            return False
+        has_variable_window = (
+            forward_args.variable_window_token_starts is not None
+            or forward_args.variable_window_token_ends is not None
+        )
+        if has_variable_window and not self.supports_variable_window:
+            logger.debug(f"{type(self).__name__} does not support variable-window attention.")
             return False
         return self._is_supported(q, k, v, metadata, forward_args, phase=phase)
 
