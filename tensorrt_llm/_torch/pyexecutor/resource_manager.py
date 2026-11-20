@@ -161,6 +161,19 @@ class ResourceManagerType(enum.Enum):
     KV_CACHE_COMPRESSION_MANAGER = "KV_CACHE_COMPRESSION_MANAGER"
 
 
+def is_context_only_kv_cache(kv_cache_manager: object) -> bool:
+    """Whether a KV cache manager can serve context requests only.
+
+    A disaggregated context worker may omit generation-only cache state: the
+    KDA draft-verification buffers (``kda_context_only``) or the FP4 MLA V
+    scales and packed V (``fp4_mla_context_only_cache``). Such a worker
+    cannot run a generation row, including a warmup or padding dummy.
+    """
+    return (getattr(kv_cache_manager, "kda_context_only", False) is True
+            or getattr(kv_cache_manager, "fp4_mla_context_only_cache",
+                       False) is True)
+
+
 def compute_page_count(token_count: int, tokens_per_page: int) -> int:
     return (token_count + tokens_per_page) // tokens_per_page
 
@@ -397,6 +410,12 @@ class KVCacheManager(BaseResourceManager):
     # state a second time. Only a full re-prefill (rewind target 0) is safe.
     _has_recurrent_state: bool = False
 
+    @property
+    def spec_recompute_tail(self) -> int:
+        """Prompt-tail tokens recomputed on a prefix hit for a hidden-state
+        drafter: 0 off, -1 the whole prompt."""
+        return self._spec_recompute_tail
+
     def __init__(
         self,
         kv_cache_config: KvCacheConfig,
@@ -439,6 +458,15 @@ class KVCacheManager(BaseResourceManager):
         enable_chunked_prefill: bool = False,
         **kwargs,
     ) -> None:
+        logger.warning_once(
+            f"KV cache manager V1 ({type(self).__name__}) is deprecated as of "
+            "TensorRT-LLM 1.4 (2026-11) and will be removed after the 3-month "
+            "migration period; it keeps working until then. Use KV cache "
+            "manager V2 (kv_cache_config.use_kv_cache_manager_v2=True, the "
+            "default) for supported features. Sleep mode still requires V1 "
+            "until V2 support is available. See "
+            "https://github.com/NVIDIA/TensorRT-LLM#deprecation-policy",
+            key="deprecated_kv_cache_manager_v1")
         self.mapping = mapping
         self.dtype = dtype
         self.kv_cache_type = kv_cache_type
@@ -1338,13 +1366,16 @@ class KVCacheManager(BaseResourceManager):
         enforced by the caller: the micro-batch scheduler admits on estimated
         reuse, and ``fit_token_budget`` needs chunking to trim the extra
         compute tokens when a batch of rewound requests exceeds
-        ``max_num_tokens``.
+        ``max_num_tokens``. A context-only (disaggregated) request is not
+        rewound: this manager's draft pages are not transferred, so the
+        generation worker's drafter starts from an empty context whatever the
+        context server recomputes.
         """
         tail = self._spec_recompute_tail
         tokens_per_block = self.tokens_per_block
         for req in batch_llm_requests:
             prepopulated = req.prepopulated_prompt_len
-            if prepopulated <= 0:
+            if prepopulated <= 0 or req.is_context_only_request:
                 continue
             prompt_len = req.prompt_len
             if tail < 0:
@@ -2720,6 +2751,11 @@ class KVCacheManager(BaseResourceManager):
     def pin_blocks(self, request_id: int):
         self.impl.pin_blocks(request_id)
 
+    def batch_block_table_key(self, request_ids: List[int]) -> Optional[tuple]:
+        """Key under which ``copy_batch_block_offsets`` rows of ``request_ids`` are unchanged (see
+        ``KVCacheManagerV2.batch_block_table_key``); None: always copy."""
+        return None
+
     def copy_batch_block_offsets(self,
                                  dst_tensor: torch.Tensor,
                                  request_ids: List[int],
@@ -3008,6 +3044,11 @@ class KVCacheCompressionManager(BaseResourceManager):
     def has_independent_draft_kv_cache(self) -> bool:
         return self.draft_kv_cache_manager is not None
 
+    @property
+    def mixed_precision_high_window(self) -> Optional[tuple[int, int]]:
+        """``(first_n, last_n)`` tokens per sequence left unquantized in cold tiers, else None."""
+        return None
+
     def create_cold_page_codec(
         self,
         cache_config: object,
@@ -3226,7 +3267,10 @@ class ResourceManager:
             kv_cache_manager.maybe_fit_token_budget(scheduled_batch)
 
     @nvtx_range("prepare_resources")
-    def prepare_resources(self, scheduled_batch: ScheduledRequests):
+    def prepare_resources(self,
+                          scheduled_batch: ScheduledRequests,
+                          *,
+                          publish_connector_output: bool = True) -> None:
         for _, resource_manager in self.resource_managers.items():
             if hasattr(resource_manager, "prepare_resources"):
                 resource_manager.prepare_resources(scheduled_batch)
@@ -3238,7 +3282,8 @@ class ResourceManager:
         # run. See `report_batch_to_connector`.
         kv_cache_manager = self.resource_managers.get(
             ResourceManagerType.KV_CACHE_MANAGER)
-        if hasattr(kv_cache_manager, "report_batch_to_connector"):
+        if publish_connector_output and hasattr(kv_cache_manager,
+                                                "report_batch_to_connector"):
             kv_cache_manager.report_batch_to_connector(scheduled_batch)
 
     @nvtx_range("update_resources")

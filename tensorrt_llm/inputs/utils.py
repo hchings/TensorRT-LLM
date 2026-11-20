@@ -6,8 +6,8 @@ import base64
 from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
-from typing import (Any, Collection, Coroutine, Dict, List, Optional, Tuple,
-                    TypedDict, Union)
+from typing import (Any, Collection, Coroutine, Dict, List, NamedTuple,
+                    Optional, Tuple, TypedDict, Union)
 from urllib.parse import urlparse
 
 import numpy as np
@@ -25,7 +25,6 @@ from tensorrt_llm.inputs.content_format import (ContentFormat,
 from tensorrt_llm.inputs.data import prompt_inputs
 from tensorrt_llm.inputs.media_io import (MEDIA_IO_REGISTRY, VideoMediaIO,
                                           _decode_base64_with_limit,
-                                          _get_aiohttp_session,
                                           _load_and_convert_image,
                                           _normalize_file_uri,
                                           _safe_aiohttp_get, _safe_request_get)
@@ -38,6 +37,7 @@ from tensorrt_llm.inputs.multimodal_data import VideoData as VideoData
 from tensorrt_llm.inputs.registry import (MULTIMODAL_PLACEHOLDER_REGISTRY,
                                           MultimodalPlaceholderPlacement)
 from tensorrt_llm.llmapi.llm_utils import ModelLoader
+from tensorrt_llm.metrics.perf_utils import _time_input_processing
 from tensorrt_llm.tokenizer import TokenizerBase, TransformersTokenizer
 from tensorrt_llm.tokenizer.deepseek_v4 import DeepseekV4Tokenizer
 from tensorrt_llm.tokenizer.deepseek_v32 import DeepseekV32Tokenizer
@@ -84,7 +84,7 @@ def load_image(image: Union[str, Image.Image],
     elif parsed_url.scheme == "data":
         image = load_base64_image(parsed_url)
     elif parsed_url.scheme in ("", "file"):
-        image = _load_and_convert_image(image)
+        image = _load_and_convert_image(Path(_normalize_file_uri(image)))
     else:
         raise ValueError(f"Unsupported URL scheme: {parsed_url.scheme!r}")
 
@@ -106,15 +106,14 @@ async def async_load_image(
     parsed_url = urlparse(image)
 
     if parsed_url.scheme in ["http", "https"]:
-        session = await _get_aiohttp_session()
-        content = await _safe_aiohttp_get(image, session=session)
+        content = await _safe_aiohttp_get(image)
         image = await asyncio.to_thread(_load_and_convert_image,
                                         BytesIO(content))
     elif parsed_url.scheme == "data":
         image = await asyncio.to_thread(load_base64_image, parsed_url)
     elif parsed_url.scheme in ("", "file"):
         image = await asyncio.to_thread(_load_and_convert_image,
-                                        Path(parsed_url.path))
+                                        Path(_normalize_file_uri(image)))
     else:
         raise ValueError(f"Unsupported URL scheme: {parsed_url.scheme!r}")
 
@@ -194,8 +193,7 @@ async def async_load_video(video: str,
                             extract_audio=extract_audio)
     parsed_url = urlparse(video)
     if parsed_url.scheme in ["http", "https"]:
-        session = await _get_aiohttp_session()
-        video_data = await _safe_aiohttp_get(video, session=session)
+        video_data = await _safe_aiohttp_get(video)
         return await asyncio.to_thread(video_io.load_bytes, video_data)
     elif parsed_url.scheme == "data":
         decoded_video = await asyncio.to_thread(load_base64_video, video)
@@ -241,8 +239,7 @@ async def async_load_audio(
     parsed_url = urlparse(audio)
 
     if parsed_url.scheme in ["http", "https"]:
-        session = await _get_aiohttp_session()
-        audio_data = await _safe_aiohttp_get(audio, session=session)
+        audio_data = await _safe_aiohttp_get(audio)
         audio = BytesIO(audio_data)
     elif parsed_url.scheme in ("", "file"):
         audio = _normalize_file_uri(
@@ -414,9 +411,12 @@ class MultimodalDataTracker:
                 out[modality].append(result)
             return dict(out)
 
+        if not self._data and not self._embeddings:
+            return None, None
         # _data and _embeddings also gathered concurrently
-        data_result, embed_result = await asyncio.gather(
-            _retrieve(self._data), _retrieve(self._embeddings))
+        with _time_input_processing("media_load"):
+            data_result, embed_result = await asyncio.gather(
+                _retrieve(self._data), _retrieve(self._embeddings))
         return data_result, embed_result
 
     async def discard_all_async(
@@ -663,6 +663,78 @@ def resolve_hf_chat_template(
     return None
 
 
+class _RenderDispatch(NamedTuple):
+    """The renderer `apply_chat_template` uses for a set of inputs.
+
+    `kind` is `"deepseek_v41"`, `"deepseek"` (the other DeepSeek
+    tokenizers), `"passthrough"` (the model skips chat templates),
+    `"native"` (a tokenizer-native python template) or `"jinja"`.
+    `tokenizer` is the object that renderer is called on, and `template`
+    is the resolved source for `"jinja"` (None when no template resolves).
+    """
+    kind: str
+    tokenizer: Any
+    template: Optional[str] = None
+
+
+def _resolve_render_dispatch(
+    *,
+    model_type: Optional[str],
+    tokenizer: Union[TransformersTokenizer, TokenizerBase],
+    processor: ProcessorMixin,
+    chat_template: Optional[str],
+    tools: Optional[list[dict[str, Any]]],
+) -> _RenderDispatch:
+    """Pick the renderer, in the order `apply_chat_template` checks them."""
+    if isinstance(tokenizer, DeepseekV41Tokenizer):
+        return _RenderDispatch("deepseek_v41", tokenizer)
+    if isinstance(tokenizer, (DeepseekV32Tokenizer, DeepseekV4Tokenizer)):
+        return _RenderDispatch("deepseek", tokenizer)
+    # Before the tokenizer, processor and template are needed: the registry
+    # may already know this model skips chat templates entirely.
+    if model_type and MULTIMODAL_PLACEHOLDER_REGISTRY.get_content_format(
+            model_type) == ContentFormat.PASSTHROUGH:
+        return _RenderDispatch("passthrough", tokenizer)
+    if isinstance(tokenizer, TransformersTokenizer):
+        # The TokenizerBase renders the template.
+        tokenizer = tokenizer.tokenizer
+    if (chat_template is None
+            and getattr(processor, "chat_template", None) is None
+            and getattr(tokenizer, "chat_template", None) is None
+            and _has_python_chat_template(tokenizer)):
+        return _RenderDispatch("native", tokenizer)
+    return _RenderDispatch(
+        "jinja", tokenizer,
+        resolve_hf_chat_template(tokenizer, processor, chat_template, tools))
+
+
+def rendered_hf_chat_template_source(
+    *,
+    tokenizer: Union[TransformersTokenizer, TokenizerBase],
+    processor: ProcessorMixin,
+    chat_template: Optional[str] = None,
+    tools: Optional[list[dict[str, Any]]] = None,
+    model_type: Optional[str] = None,
+) -> Optional[str]:
+    """The Jinja source `apply_chat_template` will render for these inputs.
+
+    Returns `None` when `apply_chat_template` dispatches to a renderer
+    with no Jinja source to analyze (the DeepSeek custom tokenizers, a model
+    that skips chat templates, a tokenizer-native python template) or when no
+    template resolves. Callers that construct chat_template_kwargs use this
+    to run the same referenced-kwargs analysis the render-site guard applies,
+    so they can avoid injecting a kwarg the active template never reads.
+    """
+    dispatch = _resolve_render_dispatch(model_type=model_type,
+                                        tokenizer=tokenizer,
+                                        processor=processor,
+                                        chat_template=chat_template,
+                                        tools=tools)
+    if dispatch.kind != "jinja" or not isinstance(dispatch.template, str):
+        return None
+    return dispatch.template
+
+
 def _resolve_content_format(model_type: str,
                             chat_template: Optional[str]) -> ContentFormat:
     """Determine the content format for the given model and template.
@@ -751,7 +823,13 @@ def apply_chat_template(
     - STRING: keeps flattened text with pre-inserted placeholders
     """
 
-    if isinstance(tokenizer, DeepseekV41Tokenizer):
+    dispatch = _resolve_render_dispatch(model_type=model_type,
+                                        tokenizer=tokenizer,
+                                        processor=processor,
+                                        chat_template=chat_template,
+                                        tools=tools)
+
+    if dispatch.kind == "deepseek_v41":
         # The native renderer deep-copies messages; omit pending media coroutines
         # and retain flattened content with its interleaved image placeholders.
         messages = [{
@@ -767,9 +845,7 @@ def apply_chat_template(
                                              **native_kwargs)
 
     # Handle DeepSeek tokenizers with custom chat templates.
-    if isinstance(
-            tokenizer,
-        (DeepseekV32Tokenizer, DeepseekV4Tokenizer, DeepseekV41Tokenizer)):
+    if dispatch.kind == "deepseek":
         prompt = tokenizer.apply_chat_template(
             messages=conversation,
             tools=tools,
@@ -779,20 +855,11 @@ def apply_chat_template(
             return tokenizer.encode(prompt)
         return prompt
 
-    # Check for PASSTHROUGH early — before we need tokenizer/processor/template.
-    # The registry may already know this model skips chat templates entirely.
-    registry_format = MULTIMODAL_PLACEHOLDER_REGISTRY.get_content_format(
-        model_type)
-    if registry_format == ContentFormat.PASSTHROUGH:
+    if dispatch.kind == "passthrough":
         return "".join([conv["content"] for conv in conversation])
 
-    if isinstance(tokenizer, TransformersTokenizer):
-        tokenizer = tokenizer.tokenizer  # we need the TokenizerBase for apply_chat_template
-
-    if (chat_template is None
-            and getattr(processor, "chat_template", None) is None
-            and getattr(tokenizer, "chat_template", None) is None
-            and _has_python_chat_template(tokenizer)):
+    tokenizer = dispatch.tokenizer
+    if dispatch.kind == "native":
         native_kwargs = dict(chat_template_kwargs or {})
         if documents is not None:
             native_kwargs["documents"] = documents
@@ -804,8 +871,7 @@ def apply_chat_template(
             **native_kwargs,
         )
 
-    hf_chat_template = resolve_hf_chat_template(tokenizer, processor,
-                                                chat_template, tools)
+    hf_chat_template = dispatch.template
     if hf_chat_template is None:
         raise ValueError(
             "No chat template found for the given tokenizer and tools.")
@@ -856,21 +922,22 @@ async def async_apply_chat_template(
     injected_chat_template_kwargs: Optional[Collection[str]] = None,
 ) -> (str | List[str]):
     """Apply chat template without blocking the event loop."""
-    return await asyncio.to_thread(
-        apply_chat_template,
-        model_type=model_type,
-        tokenizer=tokenizer,
-        processor=processor,
-        conversation=conversation,
-        add_generation_prompt=add_generation_prompt,
-        mm_placeholder_counts=mm_placeholder_counts,
-        tools=tools,
-        documents=documents,
-        chat_template=chat_template,
-        chat_template_kwargs=chat_template_kwargs,
-        enable_tokenize=enable_tokenize,
-        injected_chat_template_kwargs=injected_chat_template_kwargs,
-    )
+    with _time_input_processing("chat_template"):
+        return await asyncio.to_thread(
+            apply_chat_template,
+            model_type=model_type,
+            tokenizer=tokenizer,
+            processor=processor,
+            conversation=conversation,
+            add_generation_prompt=add_generation_prompt,
+            mm_placeholder_counts=mm_placeholder_counts,
+            tools=tools,
+            documents=documents,
+            chat_template=chat_template,
+            chat_template_kwargs=chat_template_kwargs,
+            enable_tokenize=enable_tokenize,
+            injected_chat_template_kwargs=injected_chat_template_kwargs,
+        )
 
 
 def apply_mm_placeholders(
