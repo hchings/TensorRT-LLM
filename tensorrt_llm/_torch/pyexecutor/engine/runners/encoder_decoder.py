@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, ClassVar
 
 import torch
 from torch import nn
@@ -53,13 +53,8 @@ from .decoder import DecoderRunner, DecoderRunnerConfig, ExtraInputsCollector
 from .decoder.dummy_requests import DummyRequestFactory
 from .decoder.graphs import DecoderCudaGraphs
 from .decoder.inputs import DecoderInputPreparer
-from .encoder import EncoderConfigMixin, EncoderMixin, EncoderPreparedInputs
-from .interface import PreparedInputs, RunnerConfig, ScheduledInputs
-
-
-@dataclass(frozen=True)
-class EncoderStageConfig(EncoderConfigMixin, RunnerConfig):
-    """Configuration for the encoder stage of an encoder-decoder model."""
+from .encoder import EncoderConfig, EncoderMixin, EncoderPreparedInputs
+from .interface import PreparedInputs, ScheduledInputs
 
 
 class EncoderStage(EncoderMixin):
@@ -68,7 +63,7 @@ class EncoderStage(EncoderMixin):
     def __init__(
         self,
         model: nn.Module,
-        config: EncoderStageConfig,
+        config: EncoderConfig,
         *,
         mapping: Mapping,
         dist: Distributed | None,
@@ -350,9 +345,7 @@ class EncoderStage(EncoderMixin):
         inputs: ScheduledInputs,
         *,
         resource_manager: ResourceManager,
-        is_dummy: bool = False,
     ) -> dict[str, Any]:
-        del is_dummy
         prepared = self._prepare_inputs(
             inputs.batch,
             resource_manager=resource_manager,
@@ -954,6 +947,9 @@ class EncoderDecoderCudaGraphs(DecoderCudaGraphs):
     from the encoder graph shapes.
     """
 
+    # Mixed shapes need the warmup-only pass; the move check misses the cross-attention metadata.
+    supports_single_pass_capture: ClassVar[bool] = False
+
     def __init__(
         self,
         *,
@@ -1332,7 +1328,7 @@ class EncoderDecoderRunner(DecoderRunner):
         model: nn.Module,
         config: EncoderDecoderRunnerConfig,
         *,
-        encoder_config: EncoderStageConfig,
+        encoder_config: EncoderConfig,
         input_processor: InputProcessor | BaseMultimodalInputProcessor,
         attention_runtime_features: AttentionRuntimeFeatures,
         mapping: Mapping,
@@ -1367,12 +1363,9 @@ class EncoderDecoderRunner(DecoderRunner):
         inputs: ScheduledInputs,
         *,
         resource_manager: ResourceManager,
-        is_dummy: bool = False,
     ) -> dict[str, Any]:
         """Run the encoder phase for ``inputs.batch.encoder_requests``."""
-        return self._encoder_stage.forward(
-            inputs, resource_manager=resource_manager, is_dummy=is_dummy
-        )
+        return self._encoder_stage.forward(inputs, resource_manager=resource_manager)
 
     def warmup_encoder(self, resource_manager: ResourceManager) -> None:
         """Warm up and capture the encoder graph shapes."""

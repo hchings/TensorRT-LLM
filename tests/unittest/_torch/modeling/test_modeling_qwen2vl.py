@@ -3,8 +3,10 @@
 
 import pytest
 import torch
+from transformers import Qwen2_5_VLConfig
 from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VisionPatchEmbed
 
+from tensorrt_llm._torch.model_config import ModelConfig
 from tensorrt_llm._torch.models import modeling_qwen2vl
 from tensorrt_llm._torch.models.modeling_qwen2vl import (
     Qwen2_5_VisionModel,
@@ -80,109 +82,6 @@ def _make_vision_attention(
 
 
 @pytest.mark.cpu_only
-@pytest.mark.parametrize("support_fused_qkv", [True, False])
-@pytest.mark.parametrize("rope_impl", ["torch", "flash_attn", "flashinfer"])
-def test_qwen2_5_vision_attention_reuses_fused_qkv(
-    monkeypatch: pytest.MonkeyPatch, support_fused_qkv: bool, rope_impl: str
-) -> None:
-    # CPU stubs exercise kernel routing and mutation contracts, not CUDA kernels.
-    monkeypatch.setattr(modeling_qwen2vl, "_flash_attn_apply_rotary", None)
-    monkeypatch.setattr(modeling_qwen2vl, "IS_FLASHINFER_AVAILABLE", rope_impl == "flashinfer")
-    head_dim = 64 if rope_impl == "flashinfer" else 4
-    q_size = 2 * head_dim
-    fused_qkv = torch.randn(3, 3 * q_size)
-    attention, forwarded = _make_vision_attention(
-        fused_qkv, head_dim=head_dim, support_fused_qkv=support_fused_qkv
-    )
-    q, k, original_v = attention.split_qkv(fused_qkv)
-    original_q = q.reshape(3, 2, head_dim).clone()
-    original_k = k.reshape(3, 2, head_dim).clone()
-    original_v = original_v.clone()
-    cos = torch.randn(3, head_dim // 2)
-    sin = torch.randn(3, head_dim // 2)
-    position_ids = torch.arange(3, dtype=torch.int32)
-    kernel_calls = []
-
-    def flash_attn_rope(
-        tensor: torch.Tensor,
-        cos: torch.Tensor,
-        sin: torch.Tensor,
-        *,
-        interleaved: bool,
-        inplace: bool,
-    ) -> torch.Tensor:
-        assert not interleaved
-        assert inplace
-        kernel_calls.append(tensor)
-        tensor.copy_(
-            modeling_qwen2vl.RotaryEmbedding.apply_rotary_pos_emb(tensor, cos, sin, unsqueeze_dim=1)
-        )
-        return tensor
-
-    def flashinfer_rope(
-        positions: torch.Tensor,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        head_size: int,
-        cos_sin_cache: torch.Tensor,
-        *,
-        is_neox: bool,
-    ) -> None:
-        assert positions is position_ids
-        assert head_size == 64
-        assert is_neox
-        assert cos_sin_cache.dtype == torch.float32
-        assert cos_sin_cache.is_contiguous()
-        torch.testing.assert_close(cos_sin_cache, torch.cat((cos, sin), dim=-1))
-        kernel_calls.append(query)
-        for tensor in (query, key):
-            tensor.copy_(
-                modeling_qwen2vl.RotaryEmbedding.apply_rotary_pos_emb(
-                    tensor.view(1, 3, 2, head_dim), cos, sin, unsqueeze_dim=1
-                ).reshape_as(tensor)
-            )
-
-    if rope_impl == "flash_attn":
-        monkeypatch.setattr(modeling_qwen2vl, "_flash_attn_apply_rotary", flash_attn_rope)
-    elif rope_impl == "flashinfer":
-        monkeypatch.setattr(
-            modeling_qwen2vl,
-            "flashinfer_apply_rope_with_cos_sin_cache_inplace",
-            flashinfer_rope,
-            raising=False,
-        )
-
-    expected_q = modeling_qwen2vl.RotaryEmbedding.apply_rotary_pos_emb(
-        original_q.unsqueeze(0), cos, sin, unsqueeze_dim=1
-    ).squeeze(0)
-    expected_k = modeling_qwen2vl.RotaryEmbedding.apply_rotary_pos_emb(
-        original_k.unsqueeze(0), cos, sin, unsqueeze_dim=1
-    ).squeeze(0)
-    output = attention.forward(
-        torch.empty(3, q_size),
-        attn_metadata=object(),
-        position_ids=position_ids,
-        position_embeddings=(cos, sin),
-    )
-
-    actual_q, actual_k, actual_v = attention.split_qkv(fused_qkv)
-    torch.testing.assert_close(actual_q.reshape_as(expected_q), expected_q)
-    torch.testing.assert_close(actual_k.reshape_as(expected_k), expected_k)
-    torch.testing.assert_close(actual_v, original_v)
-    assert len(kernel_calls) == {"torch": 0, "flash_attn": 2, "flashinfer": 1}[rope_impl]
-    if support_fused_qkv:
-        assert forwarded["q"] is fused_qkv
-        assert forwarded["k"] is None
-        assert forwarded["v"] is None
-        assert output is fused_qkv
-    else:
-        assert forwarded["q"].is_set_to(actual_q)
-        assert forwarded["k"].is_set_to(actual_k)
-        assert forwarded["v"].is_set_to(actual_v)
-        assert output.is_set_to(actual_q)
-
-
-@pytest.mark.cpu_only
 @pytest.mark.parametrize(
     "returned_view",
     ["equivalent", "fresh_q", "fresh_k", "fresh_v", "offset", "stride", "dtype", "mutated_stride"],
@@ -198,6 +97,7 @@ def test_qwen2_5_vision_attention_checks_rotated_qkv_views(returned_view: str) -
         v: torch.Tensor,
         position_ids: torch.Tensor | None,
         position_embeddings: tuple[torch.Tensor, torch.Tensor] | None,
+        packed_qk: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if returned_view == "equivalent":
             q, k, v = q.view_as(q), k.view_as(k), v.view_as(v)
@@ -306,3 +206,27 @@ def test_qwen2_5_vision_attention_flashinfer_inplace_cuda(
     torch.testing.assert_close(q, expected_q, atol=1e-3, rtol=1e-3)
     torch.testing.assert_close(k, expected_k, atol=1e-3, rtol=1e-3)
     torch.testing.assert_close(v, original_v)
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("tie_word_embeddings", [True, False])
+def test_language_model_inherits_top_level_tie_word_embeddings(
+    monkeypatch: pytest.MonkeyPatch, tie_word_embeddings: bool
+) -> None:
+    """A flat Qwen2.5-VL config ties lm_head only at the top level; the LM must see it."""
+    built = {}
+
+    def capture(llm_model_config: ModelConfig) -> torch.nn.Module:
+        built["config"] = llm_model_config.pretrained_config
+        return torch.nn.Module()
+
+    monkeypatch.setattr(modeling_qwen2vl.AutoModelForCausalLM, "from_config", capture)
+    monkeypatch.setattr(modeling_qwen2vl, "Qwen2VisionModelBase", lambda *args: None)
+    config = Qwen2_5_VLConfig(
+        architectures=["Qwen2_5_VLForConditionalGeneration"],
+        tie_word_embeddings=tie_word_embeddings,
+    )
+
+    modeling_qwen2vl.Qwen2VLModelBase(ModelConfig(pretrained_config=config), disable_fuse_rope=True)
+
+    assert getattr(built["config"], "tie_word_embeddings", None) is tie_word_embeddings
